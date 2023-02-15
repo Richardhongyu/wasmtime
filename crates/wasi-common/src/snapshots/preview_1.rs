@@ -1258,6 +1258,11 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
 
         f.sock_shutdown(SdFlags::from(how)).await
     }
+
+    async fn rdma_list(&mut self) -> Result<(), Error> {
+        println!("rdma_list test");
+        Ok(())
+    }
 }
 
 impl From<types::Advice> for Advice {
