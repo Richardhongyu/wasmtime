@@ -90,7 +90,7 @@ impl TargetIsa for AArch64Backend {
         Ok(CompiledCodeStencil {
             buffer,
             frame_size,
-            disasm: emit_result.disasm,
+            vcode: emit_result.disasm,
             value_labels_ranges,
             sized_stackslot_offsets,
             dynamic_stackslot_offsets,
@@ -194,6 +194,22 @@ impl TargetIsa for AArch64Backend {
         // We use 32-byte alignment for performance reasons, but for correctness we would only need
         // 4-byte alignment.
         32
+    }
+
+    #[cfg(feature = "disas")]
+    fn to_capstone(&self) -> Result<capstone::Capstone, capstone::Error> {
+        use capstone::prelude::*;
+        let mut cs = Capstone::new()
+            .arm64()
+            .mode(arch::arm64::ArchMode::Arm)
+            .build()?;
+        // AArch64 uses inline constants rather than a separate constant pool right now.
+        // Without this option, Capstone will stop disassembling as soon as it sees
+        // an inline constant that is not also a valid instruction. With this option,
+        // Capstone will print a `.byte` directive with the bytes of the inline constant
+        // and continue to the next instruction.
+        cs.set_skipdata(true)?;
+        Ok(cs)
     }
 }
 
@@ -361,9 +377,14 @@ mod test {
         let mut pos = FuncCursor::new(&mut func);
 
         pos.insert_block(bb0);
-        let jt = pos
-            .func
-            .create_jump_table(JumpTableData::new(bb3, &[bb1, bb2]));
+        let jt_data = JumpTableData::new(
+            pos.func.dfg.block_call(bb3, &[]),
+            &[
+                pos.func.dfg.block_call(bb1, &[]),
+                pos.func.dfg.block_call(bb2, &[]),
+            ],
+        );
+        let jt = pos.func.create_jump_table(jt_data);
         pos.ins().br_table(arg0, jt);
 
         pos.insert_block(bb1);

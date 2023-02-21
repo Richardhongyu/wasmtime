@@ -165,6 +165,12 @@ macro_rules! newtype_of_reg {
             }
         }
 
+        impl From<$newtype_reg_mem> for $newtype_reg_mem_imm {
+            fn from(r: $newtype_reg_mem) -> Self {
+                $newtype_reg_mem_imm(r.0.into())
+            }
+        }
+
         impl $newtype_reg_mem_imm {
             /// Construct this newtype from the given `RegMemImm`, or return
             /// `None` if the `RegMemImm` is not a valid instance of this
@@ -611,13 +617,6 @@ impl RegMemImm {
         }
     }
 
-    pub(crate) fn to_reg(&self) -> Option<Reg> {
-        match self {
-            Self::Reg { reg } => Some(*reg),
-            _ => None,
-        }
-    }
-
     pub(crate) fn with_allocs(&self, allocs: &mut AllocationConsumer<'_>) -> Self {
         match self {
             Self::Reg { reg } => Self::Reg {
@@ -627,6 +626,15 @@ impl RegMemImm {
                 addr: addr.with_allocs(allocs),
             },
             Self::Imm { .. } => self.clone(),
+        }
+    }
+}
+
+impl From<RegMem> for RegMemImm {
+    fn from(rm: RegMem) -> RegMemImm {
+        match rm {
+            RegMem::Reg { reg } => RegMemImm::Reg { reg },
+            RegMem::Mem { addr } => RegMemImm::Mem { addr },
         }
     }
 }
@@ -711,12 +719,6 @@ impl RegMem {
             RegMem::Mem { addr, .. } => addr.get_operands(collector),
         }
     }
-    pub(crate) fn to_reg(&self) -> Option<Reg> {
-        match self {
-            RegMem::Reg { reg } => Some(*reg),
-            _ => None,
-        }
-    }
 
     pub(crate) fn with_allocs(&self, allocs: &mut AllocationConsumer<'_>) -> Self {
         match self {
@@ -727,6 +729,12 @@ impl RegMem {
                 addr: addr.with_allocs(allocs),
             },
         }
+    }
+}
+
+impl From<Reg> for RegMem {
+    fn from(reg: Reg) -> RegMem {
+        RegMem::Reg { reg }
     }
 }
 
@@ -884,6 +892,7 @@ pub(crate) enum InstructionSet {
     #[allow(dead_code)] // never constructed (yet).
     BMI2,
     FMA,
+    AVX,
     AVX512BITALG,
     AVX512DQ,
     AVX512F,
@@ -1477,14 +1486,7 @@ impl fmt::Display for SseOpcode {
     }
 }
 
-#[derive(Clone, PartialEq)]
-#[allow(missing_docs)]
-pub enum AvxOpcode {
-    Vfmadd213ss,
-    Vfmadd213sd,
-    Vfmadd213ps,
-    Vfmadd213pd,
-}
+pub use crate::isa::x64::lower::isle::generated_code::AvxOpcode;
 
 impl AvxOpcode {
     /// Which `InstructionSet`s support the opcode?
@@ -1494,25 +1496,118 @@ impl AvxOpcode {
             | AvxOpcode::Vfmadd213sd
             | AvxOpcode::Vfmadd213ps
             | AvxOpcode::Vfmadd213pd => smallvec![InstructionSet::FMA],
+            AvxOpcode::Vminps
+            | AvxOpcode::Vminpd
+            | AvxOpcode::Vmaxps
+            | AvxOpcode::Vmaxpd
+            | AvxOpcode::Vandnps
+            | AvxOpcode::Vandnpd
+            | AvxOpcode::Vpandn
+            | AvxOpcode::Vcmpps
+            | AvxOpcode::Vcmppd
+            | AvxOpcode::Vpsrlw
+            | AvxOpcode::Vpsrld
+            | AvxOpcode::Vpsrlq
+            | AvxOpcode::Vpaddb
+            | AvxOpcode::Vpaddw
+            | AvxOpcode::Vpaddd
+            | AvxOpcode::Vpaddq
+            | AvxOpcode::Vpaddsb
+            | AvxOpcode::Vpaddsw
+            | AvxOpcode::Vpaddusb
+            | AvxOpcode::Vpaddusw
+            | AvxOpcode::Vpsubb
+            | AvxOpcode::Vpsubw
+            | AvxOpcode::Vpsubd
+            | AvxOpcode::Vpsubq
+            | AvxOpcode::Vpsubsb
+            | AvxOpcode::Vpsubsw
+            | AvxOpcode::Vpsubusb
+            | AvxOpcode::Vpsubusw
+            | AvxOpcode::Vpavgb
+            | AvxOpcode::Vpavgw
+            | AvxOpcode::Vpand
+            | AvxOpcode::Vandps
+            | AvxOpcode::Vandpd
+            | AvxOpcode::Vpor
+            | AvxOpcode::Vorps
+            | AvxOpcode::Vorpd
+            | AvxOpcode::Vpxor
+            | AvxOpcode::Vxorps
+            | AvxOpcode::Vxorpd
+            | AvxOpcode::Vpmullw
+            | AvxOpcode::Vpmulld
+            | AvxOpcode::Vpmulhw
+            | AvxOpcode::Vpmulhd
+            | AvxOpcode::Vpmulhrsw
+            | AvxOpcode::Vpmulhuw
+            | AvxOpcode::Vpmuldq
+            | AvxOpcode::Vpmuludq
+            | AvxOpcode::Vpunpckhwd
+            | AvxOpcode::Vpunpcklwd
+            | AvxOpcode::Vunpcklps
+            | AvxOpcode::Vaddps
+            | AvxOpcode::Vaddpd
+            | AvxOpcode::Vsubps
+            | AvxOpcode::Vsubpd
+            | AvxOpcode::Vmulps
+            | AvxOpcode::Vmulpd
+            | AvxOpcode::Vdivps
+            | AvxOpcode::Vdivpd
+            | AvxOpcode::Vpcmpeqb
+            | AvxOpcode::Vpcmpeqw
+            | AvxOpcode::Vpcmpeqd
+            | AvxOpcode::Vpcmpeqq
+            | AvxOpcode::Vpcmpgtb
+            | AvxOpcode::Vpcmpgtw
+            | AvxOpcode::Vpcmpgtd
+            | AvxOpcode::Vpcmpgtq
+            | AvxOpcode::Vblendvps
+            | AvxOpcode::Vblendvpd
+            | AvxOpcode::Vpblendvb
+            | AvxOpcode::Vmovlhps
+            | AvxOpcode::Vpminsb
+            | AvxOpcode::Vpminsw
+            | AvxOpcode::Vpminsd
+            | AvxOpcode::Vpminub
+            | AvxOpcode::Vpminuw
+            | AvxOpcode::Vpminud
+            | AvxOpcode::Vpmaxsb
+            | AvxOpcode::Vpmaxsw
+            | AvxOpcode::Vpmaxsd
+            | AvxOpcode::Vpmaxub
+            | AvxOpcode::Vpmaxuw
+            | AvxOpcode::Vpmaxud
+            | AvxOpcode::Vpunpcklbw
+            | AvxOpcode::Vpunpckhbw
+            | AvxOpcode::Vpacksswb
+            | AvxOpcode::Vpackssdw
+            | AvxOpcode::Vpackuswb
+            | AvxOpcode::Vpackusdw
+            | AvxOpcode::Vpalignr
+            | AvxOpcode::Vpinsrb
+            | AvxOpcode::Vpinsrw
+            | AvxOpcode::Vpinsrd
+            | AvxOpcode::Vpinsrq
+            | AvxOpcode::Vpmaddwd
+            | AvxOpcode::Vpmaddubsw
+            | AvxOpcode::Vinsertps
+            | AvxOpcode::Vpshufb
+            | AvxOpcode::Vshufps
+            | AvxOpcode::Vpsllw
+            | AvxOpcode::Vpslld
+            | AvxOpcode::Vpsllq
+            | AvxOpcode::Vpsraw
+            | AvxOpcode::Vpsrad => {
+                smallvec![InstructionSet::AVX]
+            }
         }
-    }
-}
-
-impl fmt::Debug for AvxOpcode {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        let name = match self {
-            AvxOpcode::Vfmadd213ss => "vfmadd213ss",
-            AvxOpcode::Vfmadd213sd => "vfmadd213sd",
-            AvxOpcode::Vfmadd213ps => "vfmadd213ps",
-            AvxOpcode::Vfmadd213pd => "vfmadd213pd",
-        };
-        write!(fmt, "{}", name)
     }
 }
 
 impl fmt::Display for AvxOpcode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Debug::fmt(self, f)
+        format!("{self:?}").to_lowercase().fmt(f)
     }
 }
 

@@ -186,6 +186,11 @@ impl Context for IsleContext<'_, '_, MInst, X64Backend> {
     }
 
     #[inline]
+    fn has_avx(&mut self) -> bool {
+        self.backend.x64_flags.has_avx()
+    }
+
+    #[inline]
     fn avx512vl_enabled(&mut self, _: Type) -> bool {
         self.backend.x64_flags.use_avx512vl_simd()
     }
@@ -257,6 +262,10 @@ impl Context for IsleContext<'_, '_, MInst, X64Backend> {
         debug_assert!(ty.lane_bits().is_power_of_two());
 
         ty.lane_bits() - 1
+    }
+
+    fn shift_amount_masked(&mut self, ty: Type, val: Imm64) -> u32 {
+        (val.bits() as u32) & self.shift_mask(ty)
     }
 
     #[inline]
@@ -433,6 +442,11 @@ impl Context for IsleContext<'_, '_, MInst, X64Backend> {
     #[inline]
     fn xmm_to_xmm_mem_imm(&mut self, r: Xmm) -> XmmMemImm {
         r.into()
+    }
+
+    #[inline]
+    fn xmm_mem_to_xmm_mem_imm(&mut self, r: &XmmMem) -> XmmMemImm {
+        r.clone().into()
     }
 
     #[inline]
@@ -877,12 +891,11 @@ impl Context for IsleContext<'_, '_, MInst, X64Backend> {
                 None
             };
             let dividend_hi = self.lower_ctx.alloc_tmp(types::I64).only_reg().unwrap();
-            self.lower_ctx.emit(MInst::alu_rmi_r(
-                OperandSize::Size32,
-                AluRmiROpcode::Xor,
-                RegMemImm::reg(dividend_hi.to_reg()),
-                dividend_hi,
-            ));
+            self.lower_ctx.emit(MInst::AluConstOp {
+                op: AluRmiROpcode::Xor,
+                size: OperandSize::Size32,
+                dst: WritableGpr::from_reg(Gpr::new(dividend_hi.to_reg()).unwrap()),
+            });
             self.lower_ctx.emit(MInst::checked_div_or_rem_seq(
                 kind.clone(),
                 size,

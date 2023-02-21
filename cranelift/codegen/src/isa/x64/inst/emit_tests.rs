@@ -3964,25 +3964,25 @@ fn test_x64_emit() {
     // XMM FMA
 
     insns.push((
-        Inst::xmm_rm_r_vex(AvxOpcode::Vfmadd213ss, RegMem::reg(xmm2), xmm1, w_xmm0),
+        Inst::xmm_rmr_vex3(AvxOpcode::Vfmadd213ss, RegMem::reg(xmm2), xmm1, w_xmm0),
         "C4E271A9C2",
         "vfmadd213ss %xmm0, %xmm1, %xmm2, %xmm0",
     ));
 
     insns.push((
-        Inst::xmm_rm_r_vex(AvxOpcode::Vfmadd213sd, RegMem::reg(xmm5), xmm4, w_xmm3),
+        Inst::xmm_rmr_vex3(AvxOpcode::Vfmadd213sd, RegMem::reg(xmm5), xmm4, w_xmm3),
         "C4E2D9A9DD",
         "vfmadd213sd %xmm3, %xmm4, %xmm5, %xmm3",
     ));
 
     insns.push((
-        Inst::xmm_rm_r_vex(AvxOpcode::Vfmadd213ps, RegMem::reg(xmm2), xmm1, w_xmm0),
+        Inst::xmm_rmr_vex3(AvxOpcode::Vfmadd213ps, RegMem::reg(xmm2), xmm1, w_xmm0),
         "C4E271A8C2",
         "vfmadd213ps %xmm0, %xmm1, %xmm2, %xmm0",
     ));
 
     insns.push((
-        Inst::xmm_rm_r_vex(AvxOpcode::Vfmadd213pd, RegMem::reg(xmm5), xmm4, w_xmm3),
+        Inst::xmm_rmr_vex3(AvxOpcode::Vfmadd213pd, RegMem::reg(xmm5), xmm4, w_xmm3),
         "C4E2D9A8DD",
         "vfmadd213pd %xmm3, %xmm4, %xmm5, %xmm3",
     ));
@@ -4861,6 +4861,20 @@ fn test_x64_emit() {
     ));
 
     // ========================================================
+    // XmmRmRImmVex
+    insns.push((
+        Inst::XmmVexPinsr {
+            op: AvxOpcode::Vpinsrb,
+            dst: Writable::from_reg(Xmm::new(xmm13).unwrap()),
+            src1: Xmm::new(xmm14).unwrap(),
+            src2: GprMem::new(RegMem::reg(r15)).unwrap(),
+            imm: 2,
+        },
+        "C4430920EF02",
+        "vpinsrb $2 %xmm14, %r15, %xmm13",
+    ));
+
+    // ========================================================
     // Pertaining to atomics.
     let am1: SyntheticAmode =
         Amode::imm_reg_reg_shift(321, Gpr::new(r10).unwrap(), Gpr::new(rdx).unwrap(), 2).into();
@@ -5135,6 +5149,7 @@ fn test_x64_emit() {
     isa_flag_builder.enable("has_ssse3").unwrap();
     isa_flag_builder.enable("has_sse41").unwrap();
     isa_flag_builder.enable("has_fma").unwrap();
+    isa_flag_builder.enable("has_avx").unwrap();
     isa_flag_builder.enable("has_avx512bitalg").unwrap();
     isa_flag_builder.enable("has_avx512dq").unwrap();
     isa_flag_builder.enable("has_avx512f").unwrap();

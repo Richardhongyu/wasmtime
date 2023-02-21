@@ -1,12 +1,13 @@
-use crate::codegen::ir::{ArgumentExtension, ArgumentPurpose};
 use crate::config::Config;
+use crate::cranelift_arbitrary::CraneliftArbitrary;
 use anyhow::Result;
 use arbitrary::{Arbitrary, Unstructured};
+use cranelift::codegen::data_value::DataValue;
 use cranelift::codegen::ir::instructions::InstructionFormat;
 use cranelift::codegen::ir::stackslot::StackSize;
 use cranelift::codegen::ir::{types::*, FuncRef, LibCall, UserExternalName, UserFuncName};
 use cranelift::codegen::ir::{
-    AbiParam, Block, ExternalName, Function, Opcode, Signature, StackSlot, Type, Value,
+    Block, ExternalName, Function, Opcode, Signature, StackSlot, Type, Value,
 };
 use cranelift::codegen::isa::CallConv;
 use cranelift::frontend::{FunctionBuilder, FunctionBuilderContext, Switch, Variable};
@@ -17,15 +18,6 @@ use cranelift::prelude::{
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use target_lexicon::{Architecture, Triple};
-
-/// Generates a Vec with `len` elements comprised of `options`
-fn arbitrary_vec<T: Clone>(
-    u: &mut Unstructured,
-    len: usize,
-    options: &[T],
-) -> arbitrary::Result<Vec<T>> {
-    (0..len).map(|_| u.choose(options).cloned()).collect()
-}
 
 type BlockSignature = Vec<Type>;
 
@@ -509,10 +501,6 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
                 (Opcode::Sdiv, &[I128, I128]),
                 (Opcode::Urem, &[I128, I128]),
                 (Opcode::Srem, &[I128, I128]),
-                (Opcode::Smin),
-                (Opcode::Smax),
-                (Opcode::Umin),
-                (Opcode::Umax),
                 (Opcode::Band, &[F32, F32]),
                 (Opcode::Band, &[F64, F64]),
                 (Opcode::Bor, &[F32, F32]),
@@ -1292,16 +1280,6 @@ const OPCODE_SIGNATURES: &[OpcodeSignature] = &[
     (Opcode::Call, &[], &[], insert_call),
 ];
 
-/// These libcalls need a interpreter implementation in `cranelift-fuzzgen.rs`
-const ALLOWED_LIBCALLS: &'static [LibCall] = &[
-    LibCall::CeilF32,
-    LibCall::CeilF64,
-    LibCall::FloorF32,
-    LibCall::FloorF64,
-    LibCall::TruncF32,
-    LibCall::TruncF64,
-];
-
 pub struct FunctionGenerator<'r, 'data>
 where
     'data: 'r,
@@ -1310,6 +1288,8 @@ where
     config: &'r Config,
     resources: Resources,
     target_triple: Triple,
+    name: UserFuncName,
+    signature: Signature,
 }
 
 #[derive(Debug, Clone)]
@@ -1338,6 +1318,8 @@ struct Resources {
     block_terminators: Vec<BlockTerminator>,
     func_refs: Vec<(Signature, FuncRef)>,
     stack_slots: Vec<(StackSlot, StackSize)>,
+    usercalls: Vec<(UserExternalName, Signature)>,
+    libcalls: Vec<LibCall>,
 }
 
 impl Resources {
@@ -1372,12 +1354,26 @@ impl<'r, 'data> FunctionGenerator<'r, 'data>
 where
     'data: 'r,
 {
-    pub fn new(u: &'r mut Unstructured<'data>, config: &'r Config, target_triple: Triple) -> Self {
+    pub fn new(
+        u: &'r mut Unstructured<'data>,
+        config: &'r Config,
+        target_triple: Triple,
+        name: UserFuncName,
+        signature: Signature,
+        usercalls: Vec<(UserExternalName, Signature)>,
+        libcalls: Vec<LibCall>,
+    ) -> Self {
         Self {
             u,
             config,
-            resources: Resources::default(),
+            resources: Resources {
+                usercalls,
+                libcalls,
+                ..Resources::default()
+            },
             target_triple,
+            name,
+            signature,
         }
     }
 
@@ -1386,63 +1382,10 @@ where
         Ok(self.u.int_in_range(param.clone())?)
     }
 
-    fn generate_callconv(&mut self) -> Result<CallConv> {
-        // TODO: Generate random CallConvs per target
-        Ok(CallConv::SystemV)
-    }
-
     fn system_callconv(&mut self) -> CallConv {
         // TODO: This currently only runs on linux, so this is the only choice
         // We should improve this once we generate flags and targets
         CallConv::SystemV
-    }
-
-    fn generate_type(&mut self) -> Result<Type> {
-        // TODO: It would be nice if we could get these directly from cranelift
-        let scalars = [
-            I8, I16, I32, I64, I128, F32, F64,
-            // R32, R64,
-        ];
-        // TODO: vector types
-
-        let ty = self.u.choose(&scalars[..])?;
-        Ok(*ty)
-    }
-
-    fn generate_abi_param(&mut self) -> Result<AbiParam> {
-        let value_type = self.generate_type()?;
-        // TODO: There are more argument purposes to be explored...
-        let purpose = ArgumentPurpose::Normal;
-        let extension = if value_type.is_int() {
-            *self.u.choose(&[
-                ArgumentExtension::Sext,
-                ArgumentExtension::Uext,
-                ArgumentExtension::None,
-            ])?
-        } else {
-            ArgumentExtension::None
-        };
-
-        Ok(AbiParam {
-            value_type,
-            purpose,
-            extension,
-        })
-    }
-
-    fn generate_signature(&mut self) -> Result<Signature> {
-        let callconv = self.generate_callconv()?;
-        let mut sig = Signature::new(callconv);
-
-        for _ in 0..self.param(&self.config.signature_params)? {
-            sig.params.push(self.generate_abi_param()?);
-        }
-
-        for _ in 0..self.param(&self.config.signature_rets)? {
-            sig.returns.push(self.generate_abi_param()?);
-        }
-
-        Ok(sig)
     }
 
     /// Finds a stack slot with size of at least n bytes
@@ -1507,31 +1450,18 @@ where
 
     /// Generates an instruction(`iconst`/`fconst`/etc...) to introduce a constant value
     fn generate_const(&mut self, builder: &mut FunctionBuilder, ty: Type) -> Result<Value> {
-        Ok(match ty {
-            I128 => {
-                // See: https://github.com/bytecodealliance/wasmtime/issues/2906
-                let hi = builder.ins().iconst(I64, self.u.arbitrary::<i64>()?);
-                let lo = builder.ins().iconst(I64, self.u.arbitrary::<i64>()?);
+        Ok(match self.u.datavalue(ty)? {
+            DataValue::I8(i) => builder.ins().iconst(ty, i as i64),
+            DataValue::I16(i) => builder.ins().iconst(ty, i as i64),
+            DataValue::I32(i) => builder.ins().iconst(ty, i as i64),
+            DataValue::I64(i) => builder.ins().iconst(ty, i as i64),
+            DataValue::I128(i) => {
+                let hi = builder.ins().iconst(I64, (i >> 64) as i64);
+                let lo = builder.ins().iconst(I64, i as i64);
                 builder.ins().iconcat(lo, hi)
             }
-            ty if ty.is_int() => {
-                let imm64 = match ty {
-                    I8 => self.u.arbitrary::<i8>()? as i64,
-                    I16 => self.u.arbitrary::<i16>()? as i64,
-                    I32 => self.u.arbitrary::<i32>()? as i64,
-                    I64 => self.u.arbitrary::<i64>()?,
-                    _ => unreachable!(),
-                };
-                builder.ins().iconst(ty, imm64)
-            }
-            // f{32,64}::arbitrary does not generate a bunch of important values
-            // such as Signaling NaN's / NaN's with payload, so generate floats from integers.
-            F32 => builder
-                .ins()
-                .f32const(f32::from_bits(u32::arbitrary(self.u)?)),
-            F64 => builder
-                .ins()
-                .f64const(f64::from_bits(u64::arbitrary(self.u)?)),
+            DataValue::F32(f) => builder.ins().f32const(f),
+            DataValue::F64(f) => builder.ins().f64const(f),
             _ => unimplemented!(),
         })
     }
@@ -1614,7 +1544,15 @@ where
             }
             BlockTerminator::BrTable(default, targets) => {
                 // Create jump tables on demand
-                let jt = builder.create_jump_table(JumpTableData::new(default, &targets));
+                let mut jt = Vec::with_capacity(targets.len());
+                for block in targets {
+                    let args = self.generate_values_for_block(builder, block)?;
+                    jt.push(builder.func.dfg.block_call(block, &args))
+                }
+
+                let args = self.generate_values_for_block(builder, default)?;
+                let jt_data = JumpTableData::new(builder.func.dfg.block_call(default, &args), &jt);
+                let jt = builder.create_jump_table(jt_data);
 
                 // br_table only supports I32
                 let val = builder.use_var(self.get_variable_of_type(I32)?);
@@ -1655,34 +1593,38 @@ where
     }
 
     fn generate_funcrefs(&mut self, builder: &mut FunctionBuilder) -> Result<()> {
-        let count = self.param(&self.config.funcrefs_per_function)?;
-        for func_index in 0..count.try_into().unwrap() {
-            let (ext_name, sig) = if self.u.arbitrary::<bool>()? {
-                let user_func_ref = builder
-                    .func
-                    .declare_imported_user_function(UserExternalName {
-                        namespace: 0,
-                        index: func_index,
-                    });
+        let usercalls: Vec<(ExternalName, Signature)> = self
+            .resources
+            .usercalls
+            .iter()
+            .map(|(name, signature)| {
+                let user_func_ref = builder.func.declare_imported_user_function(name.clone());
                 let name = ExternalName::User(user_func_ref);
-                let signature = self.generate_signature()?;
-                (name, signature)
-            } else {
-                let libcall = *self.u.choose(ALLOWED_LIBCALLS)?;
-                // TODO: Use [CallConv::for_libcall] once we generate flags.
-                let callconv = self.system_callconv();
-                let signature = libcall.signature(callconv);
-                (ExternalName::LibCall(libcall), signature)
-            };
+                (name, signature.clone())
+            })
+            .collect();
 
-            let sig_ref = builder.import_signature(sig.clone());
+        let lib_callconv = self.system_callconv();
+        let libcalls: Vec<(ExternalName, Signature)> = self
+            .resources
+            .libcalls
+            .iter()
+            .map(|libcall| {
+                let signature = libcall.signature(lib_callconv);
+                let name = ExternalName::LibCall(*libcall);
+                (name, signature)
+            })
+            .collect();
+
+        for (name, signature) in usercalls.into_iter().chain(libcalls) {
+            let sig_ref = builder.import_signature(signature.clone());
             let func_ref = builder.import_function(ExtFuncData {
-                name: ext_name,
+                name,
                 signature: sig_ref,
                 colocated: self.u.arbitrary()?,
             });
 
-            self.resources.func_refs.push((sig, func_ref));
+            self.resources.func_refs.push((signature, func_ref));
         }
 
         Ok(())
@@ -1732,7 +1674,7 @@ where
     }
 
     /// Creates a random amount of blocks in this function
-    fn generate_blocks(&mut self, builder: &mut FunctionBuilder, sig: &Signature) -> Result<()> {
+    fn generate_blocks(&mut self, builder: &mut FunctionBuilder) -> Result<()> {
         let extra_block_count = self.param(&self.config.blocks_per_function)?;
 
         // We must always have at least one block, so we generate the "extra" blocks and add 1 for
@@ -1756,7 +1698,10 @@ where
                 // a random signature;
                 if is_entry {
                     builder.append_block_params_for_function_params(block);
-                    Ok((block, sig.params.iter().map(|a| a.value_type).collect()))
+                    Ok((
+                        block,
+                        self.signature.params.iter().map(|a| a.value_type).collect(),
+                    ))
                 } else {
                     let sig = self.generate_block_signature()?;
                     sig.iter().for_each(|ty| {
@@ -1803,21 +1748,21 @@ where
                     // If we have more than one block we can allow terminators that target blocks.
                     // TODO: We could add some kind of BrReturn here, to explore edges where we
                     // exit in the middle of the function
-                    valid_terminators
-                        .extend_from_slice(&[BlockTerminatorKind::Jump, BlockTerminatorKind::Br]);
-                }
-
-                // BrTable and the Switch interface only allow targeting blocks without params
-                // we also need to ensure that the next block has no params, since that one is
-                // guaranteed to be picked in either case.
-                if has_paramless_targets && next_block_is_paramless {
                     valid_terminators.extend_from_slice(&[
+                        BlockTerminatorKind::Jump,
+                        BlockTerminatorKind::Br,
                         BlockTerminatorKind::BrTable,
-                        BlockTerminatorKind::Switch,
                     ]);
                 }
 
-                let terminator = self.u.choose(&valid_terminators[..])?;
+                // As the Switch interface only allows targeting blocks without params we need
+                // to ensure that the next block has no params, since that one is guaranteed to be
+                // picked in either case.
+                if has_paramless_targets && next_block_is_paramless {
+                    valid_terminators.push(BlockTerminatorKind::Switch);
+                }
+
+                let terminator = self.u.choose(&valid_terminators)?;
 
                 // Choose block targets for the terminators that we picked above
                 Ok(match terminator {
@@ -1833,10 +1778,8 @@ where
                         let default = next_block;
 
                         let target_count = self.param(&self.config.jump_table_entries)?;
-                        let targets = arbitrary_vec(
-                            self.u,
-                            target_count,
-                            self.resources.forward_blocks_without_params(block),
+                        let targets = Result::from_iter(
+                            (0..target_count).map(|_| self.generate_target_block(block)),
                         )?;
 
                         BlockTerminator::BrTable(default, targets)
@@ -1889,7 +1832,7 @@ where
 
         let mut params = Vec::with_capacity(param_count);
         for _ in 0..param_count {
-            params.push(self.generate_type()?);
+            params.push(self.u._type()?);
         }
         Ok(params)
     }
@@ -1909,7 +1852,7 @@ where
 
         // Create a pool of vars that are going to be used in this function
         for _ in 0..self.param(&self.config.vars_per_function)? {
-            let ty = self.generate_type()?;
+            let ty = self.u._type()?;
             let value = self.generate_const(builder, ty)?;
             vars.push((ty, value));
         }
@@ -1937,15 +1880,12 @@ where
     /// Because we generate all blocks and variables up front we already know everything that
     /// we need when generating instructions (i.e. jump targets / variables)
     pub fn generate(mut self) -> Result<Function> {
-        let sig = self.generate_signature()?;
-
         let mut fn_builder_ctx = FunctionBuilderContext::new();
-        // function name must be in a different namespace than TESTFILE_NAMESPACE (0)
-        let mut func = Function::with_name_signature(UserFuncName::user(1, 0), sig.clone());
+        let mut func = Function::with_name_signature(self.name.clone(), self.signature.clone());
 
         let mut builder = FunctionBuilder::new(&mut func, &mut fn_builder_ctx);
 
-        self.generate_blocks(&mut builder, &sig)?;
+        self.generate_blocks(&mut builder)?;
 
         // Function preamble
         self.generate_funcrefs(&mut builder)?;

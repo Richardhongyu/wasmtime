@@ -7,6 +7,7 @@ block0(v0: f32):
   return v1
 }
 
+; VCode:
 ;   pushq   %rbp
 ;   movq    %rsp, %rbp
 ; block0:
@@ -15,6 +16,17 @@ block0(v0: f32):
 ;   movq    %rbp, %rsp
 ;   popq    %rbp
 ;   ret
+; 
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   movabsq $0, %rcx ; reloc_external Abs8 %NearestF32 0
+;   callq *%rcx
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
 
 function %f2(f64) -> f64 {
 block0(v0: f64):
@@ -22,6 +34,7 @@ block0(v0: f64):
   return v1
 }
 
+; VCode:
 ;   pushq   %rbp
 ;   movq    %rsp, %rbp
 ; block0:
@@ -30,4 +43,15 @@ block0(v0: f64):
 ;   movq    %rbp, %rsp
 ;   popq    %rbp
 ;   ret
+; 
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   movabsq $0, %rcx ; reloc_external Abs8 %NearestF64 0
+;   callq *%rcx
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
 

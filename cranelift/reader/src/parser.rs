@@ -97,6 +97,8 @@ pub struct ParseOptions<'a> {
     pub default_calling_convention: CallConv,
     /// Default for unwind-info setting (enabled or disabled).
     pub unwind_info: bool,
+    /// Default for machine_code_cfg_info setting (enabled or disabled).
+    pub machine_code_cfg_info: bool,
 }
 
 impl Default for ParseOptions<'_> {
@@ -106,6 +108,7 @@ impl Default for ParseOptions<'_> {
             target: None,
             default_calling_convention: CallConv::Fast,
             unwind_info: false,
+            machine_code_cfg_info: false,
         }
     }
 }
@@ -1046,9 +1049,24 @@ impl<'a> Parser<'a> {
         let mut targets = Vec::new();
         let mut flag_builder = settings::builder();
 
-        let unwind_info = if options.unwind_info { "true" } else { "false" };
+        let bool_to_str = |val: bool| {
+            if val {
+                "true"
+            } else {
+                "false"
+            }
+        };
+
+        // default to enabling cfg info
         flag_builder
-            .set("unwind_info", unwind_info)
+            .set(
+                "machine_code_cfg_info",
+                bool_to_str(options.machine_code_cfg_info),
+            )
+            .expect("machine_code_cfg_info option should be present");
+
+        flag_builder
+            .set("unwind_info", bool_to_str(options.unwind_info))
             .expect("unwind_info option should be present");
 
         while let Some(Token::Identifier(command)) = self.token() {
@@ -1765,9 +1783,13 @@ impl<'a> Parser<'a> {
 
     // Parse a jump table literal.
     //
-    // jump-table-lit ::= "[" block {"," block } "]"
+    // jump-table-lit ::= "[" block(args) {"," block(args) } "]"
     //                  | "[]"
-    fn parse_jump_table(&mut self, def: Block) -> ParseResult<JumpTableData> {
+    fn parse_jump_table(
+        &mut self,
+        ctx: &mut Context,
+        def: ir::BlockCall,
+    ) -> ParseResult<ir::JumpTable> {
         self.match_token(Token::LBracket, "expected '[' before jump table contents")?;
 
         let mut data = Vec::new();
@@ -1775,7 +1797,8 @@ impl<'a> Parser<'a> {
         match self.token() {
             Some(Token::Block(dest)) => {
                 self.consume();
-                data.push(dest);
+                let args = self.parse_opt_value_list()?;
+                data.push(ctx.function.dfg.block_call(dest, &args));
 
                 loop {
                     match self.token() {
@@ -1783,7 +1806,8 @@ impl<'a> Parser<'a> {
                             self.consume();
                             if let Some(Token::Block(dest)) = self.token() {
                                 self.consume();
-                                data.push(dest);
+                                let args = self.parse_opt_value_list()?;
+                                data.push(ctx.function.dfg.block_call(dest, &args));
                             } else {
                                 return err!(self.loc, "expected jump_table entry");
                             }
@@ -1799,7 +1823,11 @@ impl<'a> Parser<'a> {
 
         self.consume();
 
-        Ok(JumpTableData::new(def, &data))
+        Ok(ctx
+            .function
+            .dfg
+            .jump_tables
+            .push(JumpTableData::new(def, &data)))
     }
 
     // Parse a constant decl.
@@ -2570,9 +2598,10 @@ impl<'a> Parser<'a> {
                 let arg = self.match_value("expected SSA value operand")?;
                 self.match_token(Token::Comma, "expected ',' between operands")?;
                 let block_num = self.match_block("expected branch destination block")?;
+                let args = self.parse_opt_value_list()?;
+                let destination = ctx.function.dfg.block_call(block_num, &args);
                 self.match_token(Token::Comma, "expected ',' between operands")?;
-                let table_data = self.parse_jump_table(block_num)?;
-                let table = ctx.function.dfg.jump_tables.push(table_data);
+                let table = self.parse_jump_table(ctx, destination)?;
                 InstructionData::BranchTable { opcode, arg, table }
             }
             InstructionFormat::TernaryImm8 => {
