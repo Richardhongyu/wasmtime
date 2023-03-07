@@ -1268,7 +1268,8 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
 
     async fn rdma_list(&mut self) -> Result<(), Error> {
         println!("rdma_list test");
-        test();
+        // test();
+        new_test();
         Ok(())
     }
 
@@ -1286,6 +1287,189 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
     //     println!("alloc_local_mr");
     //     rdma.request_remote_mr(layout).await
     // }
+}
+
+use rdma_sys::*;
+use std::{env, process::exit, ptr::null_mut};
+
+#[tokio::main]
+async fn new_test() {
+    println!("rdma_client: start");
+    // let args: Vec<String> = env::args().collect();
+    // if args.len() != 3 {
+        // println!("usage : cargo run --example client <server_ip> <port>");
+        // println!("input : {:?}", args);
+        // exit(-1);
+    // }
+    // let ip = args.get( 1).unwrap().as_str();
+    // let port = args.get(2).unwrap().as_str();
+    let ip = SERVER;
+    let port = PORT;
+
+    std::thread::spawn(move || server_runs());
+    tokio::time::sleep(Duration::new(1, 0)).await;
+    // run();
+
+    let ret = run(ip, port);
+
+    if ret != 0 {
+        println!(
+            "rdma_client: ret error {:?}",
+            std::io::Error::from_raw_os_error(-ret)
+        );
+        if ret == -1 {
+            println!(
+                "rdma_client: last os error {:?}",
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+    println!("rdma_client: end");
+
+
+
+}
+
+fn server_runs() {
+    println!("rdma_server: start");
+    let ret = server_run();
+    if ret != 0 {
+        println!(
+            "rdma_server: ret error {:?}",
+            std::io::Error::from_raw_os_error(-ret)
+        );
+        if ret == -1 {
+            println!(
+                "rdma_server: last os error {:?}",
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+    println!("rdma_server: end");
+}
+fn run(ip: &str, port: &str) -> i32 {
+    let mut send_msg = vec![1_u8; 16];
+    let mut recv_msg = vec![0_u8; 16];
+    let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
+    let mut res: *mut rdma_addrinfo = null_mut();
+
+    hints.ai_port_space = rdma_port_space::RDMA_PS_TCP as i32;
+    let mut ret =
+        unsafe { rdma_getaddrinfo(ip.as_ptr().cast(), port.as_ptr().cast(), &hints, &mut res) };
+
+    if ret != 0 {
+        println!("rdma_getaddrinfo");
+        return ret;
+    }
+
+    let mut attr = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
+    let mut id: *mut rdma_cm_id = null_mut();
+    attr.cap.max_send_wr = 1;
+    attr.cap.max_recv_wr = 1;
+    attr.cap.max_send_sge = 1;
+    attr.cap.max_recv_sge = 1;
+    attr.cap.max_inline_data = 16;
+    attr.qp_context = id.cast();
+    attr.sq_sig_all = 1;
+    ret = unsafe { rdma_create_ep(&mut id, res, null_mut(), &mut attr) };
+    // Check to see if we got inline data allowed or not
+    let mut send_flags = 0_u32;
+    if attr.cap.max_inline_data >= 16 {
+        send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
+    } else {
+        println!("rdma_client: device doesn't support IBV_SEND_INLINE, using sge sends");
+    }
+
+    if ret != 0 {
+        println!("rdma_create_ep");
+        unsafe {
+            rdma_freeaddrinfo(res);
+        }
+        return ret;
+    }
+
+    let mr = unsafe { rdma_reg_msgs(id, recv_msg.as_mut_ptr().cast(), 16) };
+    if mr.is_null() {
+        println!("rdma_reg_msgs for recv_msg");
+        unsafe {
+            rdma_destroy_ep(id);
+        }
+        return -1;
+    }
+
+    let mut send_mr = null_mut();
+    if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) as u32 == 0 {
+        println!("flags {:?}", send_flags);
+        send_mr = unsafe { rdma_reg_msgs(id, send_msg.as_mut_ptr().cast(), 16) };
+        if send_mr.is_null() {
+            println!("rdma_reg_msgs for send_msg");
+            unsafe {
+                rdma_dereg_mr(mr);
+            }
+            return -1;
+        }
+    }
+
+    ret = unsafe { rdma_post_recv(id, null_mut(), recv_msg.as_mut_ptr().cast(), 16, mr) };
+    if ret != 0 {
+        println!("rdma_post_recv");
+        if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) as u32 == 0 {
+            unsafe { rdma_dereg_mr(send_mr) };
+        }
+        return ret;
+    }
+
+    ret = unsafe { rdma_connect(id, null_mut()) };
+    if ret != 0 {
+        println!("rdma_connect");
+        unsafe {
+            rdma_disconnect(id);
+        }
+        return ret;
+    }
+
+    ret = unsafe {
+        rdma_post_send(
+            id,
+            null_mut(),
+            send_msg.as_mut_ptr().cast(),
+            16,
+            send_mr,
+            send_flags.try_into().unwrap(),
+        )
+    };
+    if ret != 0 {
+        println!("rdma_post_send");
+        unsafe {
+            rdma_disconnect(id);
+        }
+        return ret;
+    }
+
+    let mut wc = unsafe { std::mem::zeroed::<ibv_wc>() };
+    while ret == 0 {
+        ret = unsafe { rdma_get_send_comp(id, &mut wc) };
+    }
+    if ret < 0 {
+        println!("rdma_get_send_comp");
+        unsafe {
+            rdma_disconnect(id);
+        }
+        return ret;
+    }
+
+    ret = 0;
+    while ret == 0 {
+        ret = unsafe { rdma_get_recv_comp(id, &mut wc) };
+    }
+    println!("rdma_client: recv msg : {:?}", recv_msg);
+    if ret < 0 {
+        println!("rdma_get_recv_comp");
+    } else {
+        ret = 0;
+    }
+
+    ret
 }
 
 async fn client(addr: SocketAddrV4) -> io::Result<()> {
@@ -1327,6 +1511,175 @@ async fn test() {
         .unwrap();
 }
 
+// #[tokio::main]
+// async fn server_run() -> i32 {
+fn server_run() -> i32 {
+    let mut send_msg = vec![1_u8; 16];
+    let mut recv_msg = vec![0_u8; 16];
+    let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
+    let mut res: *mut rdma_addrinfo = null_mut();
+    hints.ai_flags = RAI_PASSIVE.try_into().unwrap();
+    hints.ai_port_space = rdma_port_space::RDMA_PS_TCP.try_into().unwrap();
+    let mut ret = unsafe {
+        rdma_getaddrinfo(
+            SERVER.as_ptr().cast(),
+            PORT.as_ptr().cast(),
+            &hints,
+            &mut res,
+        )
+    };
+
+    if ret != 0 {
+        println!("rdma_getaddrinfo");
+        return ret;
+    }
+
+    let mut listen_id = null_mut();
+    let mut id = null_mut();
+
+    let mut init_attr = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
+    init_attr.cap.max_send_wr = 1;
+    init_attr.cap.max_recv_wr = 1;
+    init_attr.cap.max_send_sge = 1;
+    init_attr.cap.max_recv_sge = 1;
+    init_attr.cap.max_inline_data = 16;
+    init_attr.sq_sig_all = 1;
+    ret = unsafe { rdma_create_ep(&mut listen_id, res, null_mut(), &mut init_attr) };
+    // Check to see if we got inline data allowed or not
+    if ret != 0 {
+        println!("rdma_create_ep");
+        unsafe {
+            rdma_freeaddrinfo(res);
+        }
+        return ret;
+    }
+    ret = unsafe { rdma_listen(listen_id, 0) };
+    if ret != 0 {
+        println!("rdma_listen");
+        unsafe {
+            rdma_destroy_ep(listen_id);
+        }
+        return ret;
+    }
+
+    ret = unsafe { rdma_get_request(listen_id, &mut id) };
+    if ret != 0 {
+        println!("rdma_get_request");
+        unsafe {
+            rdma_destroy_ep(listen_id);
+        }
+        return ret;
+    }
+
+    let mut qp_attr = unsafe { std::mem::zeroed::<ibv_qp_attr>() };
+    ret = unsafe {
+        ibv_query_qp(
+            (*id).qp,
+            &mut qp_attr,
+            ibv_qp_attr_mask::IBV_QP_CAP.0.try_into().unwrap(),
+            &mut init_attr,
+        )
+    };
+
+    if ret != 0 {
+        println!("ibv_query_qp");
+        unsafe {
+            rdma_destroy_ep(id);
+        }
+        return ret;
+    }
+
+    let mut send_flags = 0_u32;
+    if init_attr.cap.max_inline_data >= 16 {
+        send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
+    } else {
+        println!("rdma_server: device doesn't support IBV_SEND_INLINE, using sge sends");
+    }
+
+    let recv_mr = unsafe { rdma_reg_msgs(id, recv_msg.as_mut_ptr().cast(), 16) };
+    if recv_mr.is_null() {
+        ret = -1;
+        println!("rdma_reg_msgs for recv_msg");
+        unsafe {
+            rdma_dereg_mr(recv_mr);
+        }
+        return ret;
+    }
+
+    let mut send_mr = null_mut();
+    if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) == 0 {
+        send_mr = unsafe { rdma_reg_msgs(id, send_msg.as_mut_ptr().cast(), 16) };
+        if send_mr.is_null() {
+            ret = -1;
+            println!("rdma_reg_msgs for send_msg");
+            unsafe {
+                rdma_dereg_mr(recv_mr);
+            }
+            return ret;
+        }
+    }
+    ret = unsafe { rdma_post_recv(id, null_mut(), recv_msg.as_mut_ptr().cast(), 16, recv_mr) };
+
+    if ret != 0 {
+        println!("rdma_post_recv");
+        unsafe {
+            rdma_dereg_mr(recv_mr);
+        }
+        return ret;
+    }
+
+    ret = unsafe { rdma_accept(id, null_mut()) };
+    if ret != 0 {
+        println!("rdma_accept");
+        if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) == 0 {
+            unsafe { rdma_dereg_mr(send_mr) };
+        }
+        return ret;
+    }
+
+    let mut wc = unsafe { std::mem::zeroed::<ibv_wc>() };
+    while ret == 0 {
+        ret = unsafe { rdma_get_recv_comp(id, &mut wc) };
+    }
+    if ret < 0 {
+        println!("rdma_get_recv_comp");
+        unsafe {
+            rdma_disconnect(id);
+        }
+        return ret;
+    }
+    println!("rdma_server: recv msg : {:?}", recv_msg);
+    ret = unsafe {
+        rdma_post_send(
+            id,
+            null_mut(),
+            send_msg.as_mut_ptr().cast(),
+            16,
+            send_mr,
+            send_flags.try_into().unwrap(),
+        )
+    };
+    if ret != 0 {
+        println!("rdma_post_send");
+        unsafe {
+            rdma_disconnect(id);
+        }
+        return ret;
+    }
+
+    while ret == 0 {
+        ret = unsafe { rdma_get_send_comp(id, &mut wc) };
+    }
+    if ret < 0 {
+        println!("rdma_get_send_comp");
+    } else {
+        ret = 0;
+    }
+    ret
+}
+
+static SERVER: &str = "192.168.217.128\0";
+static PORT: &str = "7471\0";
 
 impl From<types::Advice> for Advice {
     fn from(advice: types::Advice) -> Advice {

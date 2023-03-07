@@ -43,6 +43,7 @@ wat = { workspace = true }
 serde = "1.0.94"
 serde_json = "1.0.26"
 wasmparser = { workspace = true }
+rdma-sys = "0.3.0"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["mm", "param"] }
@@ -197,15 +198,7 @@ serde = "1.0.94"
 glob = "0.3.0"
 
 [features]
-default = [
-  "jitdump",
-  "wasmtime/wat",
-  "wasmtime/parallel-compilation",
-  "vtune",
-  "wasi-nn",
-  "wasi-threads",
-  "pooling-allocator",
-]
+default = ["jitdump", "wasmtime/wat", "wasmtime/parallel-compilation", "vtune", "wasi-nn", "wasi-threads", "pooling-allocator"]
 jitdump = ["wasmtime/jitdump"]
 vtune = ["wasmtime/vtune"]
 wasi-crypto = ["dep:wasmtime-wasi-crypto"]
@@ -215,11 +208,7 @@ wasi-threads = ["dep:wasmtime-wasi-threads"]
 pooling-allocator = ["wasmtime/pooling-allocator", "wasmtime-cli-flags/pooling-allocator"]
 all-arch = ["wasmtime/all-arch"]
 posix-signals-on-macos = ["wasmtime/posix-signals-on-macos"]
-component-model = [
-  "wasmtime/component-model",
-  "wasmtime-wast/component-model",
-  "wasmtime-cli-flags/component-model"
-]
+component-model = ["wasmtime/component-model", "wasmtime-wast/component-model", "wasmtime-cli-flags/component-model"]
 
 # Stub feature that does nothing, for Cargo-features compatibility: the new
 # backend is the default now.
