@@ -1,0 +1,66 @@
+  (typename $rdma (handle))
+  (typename $rdma_error
+    (enum (@witx tag u16)
+        $success
+        $runtime_error
+        $io_error
+     )
+  )
+
+  (typename $connection_type
+    (enum (@witx tag u16) 
+    ;;; Establish reliable connection through `Socket` APIs.
+      $RCSocket
+    ;;; Establish reliable connection through `CM` APIs.
+      $RCCM
+    ;;; Establish reliable connection through `IBV` APIs.
+      $RCIBV
+    )
+  )
+  (typename $local_mr (handle ))
+ (typename $local_mr_buf (@witx pointer u8))
+  (typename $remote_mr (handle ))
+  (typename $remote_mr_buf  (@witx const_pointer u8))
+  (typename $address string)
+(module $wasi_rdma
+  (import "memory" (memory))
+
+  (@interface func (export "new_rdma")
+        (param $address $address)
+        (param $connection_type $connection_type)
+        (result $error (expected $rdma (error $rdma_error)))
+  )
+  (@interface func (export "alloc_local_mr")
+  (param $layout (@witx pointer u8))
+        (result $error (expected $local_mr (error $rdma_error)))
+  )
+  (@interface func (export "request_remote_mr")
+        (result $error (expected $remote_mr (error $rdma_error)))
+  )
+  (@interface func (export "get_remote_mr")
+       (param $remote_mr $remote_mr)
+       (result $error (expected $remote_mr_buf (error $rdma_error)))
+  )
+  (@interface func (export "get_local_mr")
+       (param $local_mr $local_mr)
+        (result $error (expected $local_mr_buf (error $rdma_error)))
+   )
+    (@interface func (export "get_mut_local_mr")
+         (param $local_mr $local_mr)
+          (result $error (expected $local_mr_buf (error $rdma_error)))
+   )
+  (@interface func (export "rdma_send")
+    (param $rdma $rdma)
+    (param $local_mr $local_mr)
+    (result $error (expected (error $rdma_error)))
+  )
+
+  (@interface func (export "rdma_write")
+    (param $rdma $rdma)
+    (param $local_mr $local_mr)
+    (param $local_mr_buf (@witx pointer u8))
+    (param $remote_mr $remote_mr)
+    (result $error (expected (error $rdma_error)))
+  )
+)
+
