@@ -54,7 +54,6 @@
 (field $qp_type $ai_qp_type)
 (field $src_len u32)
 (field $dst_len u32)
-(field $canonname string)
 ))
 (typename $ibv_qp_cap 
 (record
