@@ -237,7 +237,6 @@ pub type IbvMr = u32;
 pub type IbvWc = u32;
 pub type RdmaAddrinfo = u32;
 pub type Context = u32;
-pub type ConnParam = u32;
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct RdmaAddrinfoStruct {
@@ -247,7 +246,6 @@ pub struct RdmaAddrinfoStruct {
     pub qp_type: AiQpType,
     pub src_len: u32,
     pub dst_len: u32,
-    pub canonname: &str,
 }
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -258,26 +256,16 @@ pub struct IbvQpCap {
     pub max_recv_sge: u32,
     pub max_inline_data: u32,
 }
+pub type Rdma = u32;
 pub type RdmaCq = u32;
 pub type EpPd = u32;
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct IbvQpInitAttr {
-    pub qp_context: Id,
-    pub send_cq: RdmaCq,
-    pub recv_cq: RdmaCq,
-    /// (field $srq (handle))
-    pub cap: IbvQpCap,
-    pub qp_type: IbvQpType,
-    pub sq_sig_all: u8,
-}
-pub unsafe fn rdma_getaddrinfo(
+pub unsafe fn rdma_connect(
     node: &str,
     service: &str,
     hints: RdmaAddrinfoStruct,
-) -> Result<RdmaAddrinfo, RdmaError> {
-    let mut rp0 = MaybeUninit::<RdmaAddrinfo>::uninit();
-    let ret = rdma::rdma_getaddrinfo(
+) -> Result<Rdma, RdmaError> {
+    let mut rp0 = MaybeUninit::<Rdma>::uninit();
+    let ret = wasi_rdma::rdma_connect(
         node.as_ptr() as i32,
         node.len() as i32,
         service.as_ptr() as i32,
@@ -286,112 +274,41 @@ pub unsafe fn rdma_getaddrinfo(
         rp0.as_mut_ptr() as i32,
     );
     match ret {
-        0 => Ok(core::ptr::read(
-            rp0.as_mut_ptr() as i32 as *const RdmaAddrinfo
-        )),
+        0 => Ok(core::ptr::read(rp0.as_mut_ptr() as i32 as *const Rdma)),
         _ => Err(RdmaError(ret as u16)),
     }
-}
-
-pub unsafe fn rdma_create_ep(
-    id: Id,
-    res: RdmaAddrinfo,
-    pd: EpPd,
-    qp_init_attr: IbvQpInitAttr,
-) -> Result<(), RdmaError> {
-    let ret = rdma::rdma_create_ep(
-        id as i32,
-        res as i32,
-        pd as i32,
-        &qp_init_attr as *const _ as i32,
-    );
-    match ret {
-        0 => Ok(()),
-        _ => Err(RdmaError(ret as u16)),
-    }
-}
-
-pub unsafe fn rdma_freeaddrinfo(res: RdmaAddrinfo) -> Result<(), RdmaError> {
-    let ret = rdma::rdma_freeaddrinfo(res as i32);
-    match ret {
-        0 => Ok(()),
-        _ => Err(RdmaError(ret as u16)),
-    }
-}
-
-///
-/// ## Parameters
-///
-/// * `addr` - Register the memory region for the message buffer
-pub unsafe fn rdma_reg_msgs(id: Id, addr: *mut u8) -> Result<IbvMr, RdmaError> {
-    let mut rp0 = MaybeUninit::<IbvMr>::uninit();
-    let ret = rdma::rdma_reg_msgs(id as i32, addr as i32, rp0.as_mut_ptr() as i32);
-    match ret {
-        0 => Ok(core::ptr::read(rp0.as_mut_ptr() as i32 as *const IbvMr)),
-        _ => Err(RdmaError(ret as u16)),
-    }
-}
-
-pub unsafe fn rdma_dereg_mr(mr: IbvMr) -> Result<(), RdmaError> {
-    let ret = rdma::rdma_dereg_mr(mr as i32);
-    match ret {
-        0 => Ok(()),
-        _ => Err(RdmaError(ret as u16)),
-    }
-}
-
-pub unsafe fn rdma_post_send(id: Id, context: Context, addr: *mut u8, send_mr: IbvMr, flags: u32) {
-    rdma::rdma_post_send(
-        id as i32,
-        context as i32,
-        addr as i32,
-        send_mr as i32,
-        flags as i32,
-    );
-}
-
-pub unsafe fn rdma_destroy_ep(id: Id) -> Result<(), RdmaError> {
-    let ret = rdma::rdma_destroy_ep(id as i32);
-    match ret {
-        0 => Ok(()),
-        _ => Err(RdmaError(ret as u16)),
-    }
-}
-
-pub unsafe fn rdma_post_recv(id: Id, context: Context, addr: *mut u8, recv_mr: IbvMr) {
-    rdma::rdma_post_recv(id as i32, context as i32, addr as i32, recv_mr as i32);
-}
-
-pub unsafe fn rdma_get_send_comp(id: Id, wc: IbvWc) -> Result<IbvWc, RdmaError> {
-    let mut rp0 = MaybeUninit::<IbvWc>::uninit();
-    let ret = rdma::rdma_get_send_comp(id as i32, wc as i32, rp0.as_mut_ptr() as i32);
-    match ret {
-        0 => Ok(core::ptr::read(rp0.as_mut_ptr() as i32 as *const IbvWc)),
-        _ => Err(RdmaError(ret as u16)),
-    }
-}
-
-pub unsafe fn rdma_get_recv_comp(id: Id, wc: IbvWc) -> Result<IbvWc, RdmaError> {
-    let mut rp0 = MaybeUninit::<IbvWc>::uninit();
-    let ret = rdma::rdma_get_recv_comp(id as i32, wc as i32, rp0.as_mut_ptr() as i32);
-    match ret {
-        0 => Ok(core::ptr::read(rp0.as_mut_ptr() as i32 as *const IbvWc)),
-        _ => Err(RdmaError(ret as u16)),
-    }
-}
-
-pub unsafe fn rdma_connect(id: Id, conn_param: ConnParam) {
-    rdma::rdma_connect(id as i32, conn_param as i32);
 }
 
 pub unsafe fn rdma_disconnect(id: Id) {
-    rdma::rdma_disconnect(id as i32);
+    wasi_rdma::rdma_disconnect(id as i32);
 }
 
-pub mod rdma {
-    #[link(wasm_import_module = "rdma")]
+pub unsafe fn rdma_post_recv(rdma: Rdma, addr: *mut u8, recv_mr: IbvMr) {
+    wasi_rdma::rdma_post_recv(rdma as i32, addr as i32, recv_mr as i32);
+}
+
+pub unsafe fn rdma_get_send_comp(rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
+    let mut rp0 = MaybeUninit::<IbvWc>::uninit();
+    let ret = wasi_rdma::rdma_get_send_comp(rdma as i32, wc as i32, rp0.as_mut_ptr() as i32);
+    match ret {
+        0 => Ok(core::ptr::read(rp0.as_mut_ptr() as i32 as *const IbvWc)),
+        _ => Err(RdmaError(ret as u16)),
+    }
+}
+
+pub unsafe fn rdma_get_recv_comp(rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
+    let mut rp0 = MaybeUninit::<IbvWc>::uninit();
+    let ret = wasi_rdma::rdma_get_recv_comp(rdma as i32, wc as i32, rp0.as_mut_ptr() as i32);
+    match ret {
+        0 => Ok(core::ptr::read(rp0.as_mut_ptr() as i32 as *const IbvWc)),
+        _ => Err(RdmaError(ret as u16)),
+    }
+}
+
+pub mod wasi_rdma {
+    #[link(wasm_import_module = "wasi_rdma")]
     extern "C" {
-        pub fn rdma_getaddrinfo(
+        pub fn rdma_connect(
             arg0: i32,
             arg1: i32,
             arg2: i32,
@@ -399,16 +316,9 @@ pub mod rdma {
             arg4: i32,
             arg5: i32,
         ) -> i32;
-        pub fn rdma_create_ep(arg0: i32, arg1: i32, arg2: i32, arg3: i32) -> i32;
-        pub fn rdma_freeaddrinfo(arg0: i32) -> i32;
-        pub fn rdma_reg_msgs(arg0: i32, arg1: i32, arg2: i32) -> i32;
-        pub fn rdma_dereg_mr(arg0: i32) -> i32;
-        pub fn rdma_post_send(arg0: i32, arg1: i32, arg2: i32, arg3: i32, arg4: i32);
-        pub fn rdma_destroy_ep(arg0: i32) -> i32;
-        pub fn rdma_post_recv(arg0: i32, arg1: i32, arg2: i32, arg3: i32);
+        pub fn rdma_disconnect(arg0: i32);
+        pub fn rdma_post_recv(arg0: i32, arg1: i32, arg2: i32);
         pub fn rdma_get_send_comp(arg0: i32, arg1: i32, arg2: i32) -> i32;
         pub fn rdma_get_recv_comp(arg0: i32, arg1: i32, arg2: i32) -> i32;
-        pub fn rdma_connect(arg0: i32, arg1: i32);
-        pub fn rdma_disconnect(arg0: i32);
     }
 }
