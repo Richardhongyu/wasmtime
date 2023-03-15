@@ -259,13 +259,13 @@ pub struct IbvQpCap {
 pub type Rdma = u32;
 pub type RdmaCq = u32;
 pub type EpPd = u32;
-pub unsafe fn rdma_connect(
+pub unsafe fn rdma_init(
     node: &str,
     service: &str,
     hints: RdmaAddrinfoStruct,
 ) -> Result<Rdma, RdmaError> {
     let mut rp0 = MaybeUninit::<Rdma>::uninit();
-    let ret = wasi_rdma::rdma_connect(
+    let ret = wasi_rdma::rdma_init(
         node.as_ptr() as i32,
         node.len() as i32,
         service.as_ptr() as i32,
@@ -279,12 +279,29 @@ pub unsafe fn rdma_connect(
     }
 }
 
-pub unsafe fn rdma_disconnect(id: Id) {
-    wasi_rdma::rdma_disconnect(id as i32);
+pub unsafe fn rdma_disconnect(rdma: Rdma) {
+    wasi_rdma::rdma_disconnect(rdma as i32);
 }
 
-pub unsafe fn rdma_post_recv(rdma: Rdma, addr: *mut u8, recv_mr: IbvMr) {
-    wasi_rdma::rdma_post_recv(rdma as i32, addr as i32, recv_mr as i32);
+pub unsafe fn rdma_post_send(
+    rdma: Rdma,
+    addr: *mut u8,
+    send_mr: IbvMr,
+    flags: u32,
+) -> Result<(), RdmaError> {
+    let ret = wasi_rdma::rdma_post_send(rdma as i32, addr as i32, send_mr as i32, flags as i32);
+    match ret {
+        0 => Ok(()),
+        _ => Err(RdmaError(ret as u16)),
+    }
+}
+
+pub unsafe fn rdma_post_recv(rdma: Rdma, addr: *mut u8, recv_mr: IbvMr) -> Result<(), RdmaError> {
+    let ret = wasi_rdma::rdma_post_recv(rdma as i32, addr as i32, recv_mr as i32);
+    match ret {
+        0 => Ok(()),
+        _ => Err(RdmaError(ret as u16)),
+    }
 }
 
 pub unsafe fn rdma_get_send_comp(rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
@@ -308,16 +325,10 @@ pub unsafe fn rdma_get_recv_comp(rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaErr
 pub mod wasi_rdma {
     #[link(wasm_import_module = "wasi_rdma")]
     extern "C" {
-        pub fn rdma_connect(
-            arg0: i32,
-            arg1: i32,
-            arg2: i32,
-            arg3: i32,
-            arg4: i32,
-            arg5: i32,
-        ) -> i32;
+        pub fn rdma_init(arg0: i32, arg1: i32, arg2: i32, arg3: i32, arg4: i32, arg5: i32) -> i32;
         pub fn rdma_disconnect(arg0: i32);
-        pub fn rdma_post_recv(arg0: i32, arg1: i32, arg2: i32);
+        pub fn rdma_post_send(arg0: i32, arg1: i32, arg2: i32, arg3: i32) -> i32;
+        pub fn rdma_post_recv(arg0: i32, arg1: i32, arg2: i32) -> i32;
         pub fn rdma_get_send_comp(arg0: i32, arg1: i32, arg2: i32) -> i32;
         pub fn rdma_get_recv_comp(arg0: i32, arg1: i32, arg2: i32) -> i32;
     }
