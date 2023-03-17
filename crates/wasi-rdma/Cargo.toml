@@ -11,3 +11,4 @@ async-rdma = "0.5.0"
 portpicker = "0.1.1"
 rdma-sys = "0.3.0"
 tokio = "1.25.0"
+wiggle = { workspace = true }
