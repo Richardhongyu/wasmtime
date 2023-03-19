@@ -5,46 +5,7 @@
         $io_error
      )
   )
-(typename $ai_flags
-    (enum (@witx tag u8)
-    $DEFAULT
-    $RAI_PASSIVE
-    $RAI_NUMERICHOST
-    $RAI_NOROUTE
-    $RAI_FAMILY
-    )
-)
-(
-    typename $ai_port_space
-    (enum (@witx tag u8)
-    $DEFAULT
-    $RDMA_PS_UDP
-    $RDMA_PS_TCP
-    $RDMA_PS_IB
-    )
-)
-(typename $ai_famliy
-    (enum (@witx tag u8)
-    $DEFAULT
-    $AF_IB
-    $AF_INET
-    $AF_INET6
-    )
-)
-(typename $ai_qp_type
-    (enum (@witx tag u8)
-    $DEFAULT
-    $IBV_UD
-    $IBV_RC
-    )
-)
-(typename $ibv_qp_type
-    (enum (@witx tag u8)
-        $DEFAULT
-        $IBV_QPT_RC
-        $IBV_QPT_UC
-        $IBV_QPT_UD
-))
+
 (typename $ibv_mr (handle))
 (typename $ibv_wc (handle))
 ;;;(typename $conn_param (handle))
