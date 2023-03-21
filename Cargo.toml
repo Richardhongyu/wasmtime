@@ -198,7 +198,7 @@ serde = "1.0.94"
 glob = "0.3.0"
 
 [features]
-default = ["jitdump", "wasmtime/wat", "wasmtime/parallel-compilation", "vtune", "wasi-nn", "wasi-threads", "pooling-allocator"]
+default = ["jitdump", "wasmtime/wat", "wasmtime/parallel-compilation", "vtune", "wasi-nn", "wasi-threads", "pooling-allocator", "wasi-rdma", "debug"]
 jitdump = ["wasmtime/jitdump"]
 vtune = ["wasmtime/vtune"]
 wasi-crypto = ["dep:wasmtime-wasi-crypto"]
@@ -209,6 +209,7 @@ pooling-allocator = ["wasmtime/pooling-allocator", "wasmtime-cli-flags/pooling-a
 all-arch = ["wasmtime/all-arch"]
 posix-signals-on-macos = ["wasmtime/posix-signals-on-macos"]
 component-model = ["wasmtime/component-model", "wasmtime-wast/component-model", "wasmtime-cli-flags/component-model"]
+debug = []
 
 # Stub feature that does nothing, for Cargo-features compatibility: the new
 # backend is the default now.

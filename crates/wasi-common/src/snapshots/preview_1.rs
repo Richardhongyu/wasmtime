@@ -1273,9 +1273,21 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
         Ok(())
     }
 
-    // async fn rdma_builder(&mut self) -> Result<(), Error> {
-    //     println!("rdma_builder");
-    //     RdmaBuilder::default().connect(addr).await
+    // async fn rdma_getaddrinfo<'a>(&mut self, SERVER: &GuestPtr<'a, str>, PORT:&GuestPtr<'a, str>, hints:, res: ) -> Result<(), Error> {
+    //     println!("rdma_getaddrinfo");
+    //     let ret = rdma_getaddrinfo(
+    //         SERVER.as_ptr().cast(),
+    //         PORT.as_ptr().cast(),
+    //         &hints,
+    //         &mut res,
+    //     );
+
+    //     if ret != 0 {
+    //         println!("rdma_getaddrinfo");
+    //         return ret;
+    //     }
+
+    //     Ok(ret)
     // }
 
     // async fn request_remote_mr(&mut self, rdma: Rdma, layout: Layout) -> Result<Rdma, Error> {

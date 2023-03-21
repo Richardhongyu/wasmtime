@@ -1,7 +1,7 @@
+use anyhow::{anyhow, Error};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use anyhow::{anyhow, Error};
 /// The `Table` type is designed to map u32 handles to resources. The table is now part of the
 /// public interface to a `WasiCtx` - it is reference counted so that it can be shared beyond a
 /// `WasiCtx` with other WASI proposals (e.g. `wasi-crypto` and `wasi-nn`) to manage their
