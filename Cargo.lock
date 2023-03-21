@@ -4322,6 +4322,7 @@ dependencies = [
  "portpicker",
  "rdma-sys",
  "tokio",
+ "wiggle",
 ]
 
 [[package]]
