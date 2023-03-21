@@ -1,3 +1,5 @@
+mod wasi_rdma_wasmtime;
+
 use async_rdma::{LocalMrReadAccess, LocalMrWriteAccess, RdmaBuilder};
 use portpicker::pick_unused_port;
 use std::{
