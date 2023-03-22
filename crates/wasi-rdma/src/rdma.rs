@@ -2,7 +2,6 @@ use crate::guest_types::RdmaError::RuntimeError;
 use crate::guest_types::{IbvQpCap, RdmaAddrinfoStruct, RdmaError};
 use rdma_sys::{ibv_qp_cap, ibv_qp_init_attr, rdma_addr, rdma_addrinfo, rdma_cm_id};
 use std::ptr::null_mut;
-use std::sync::Arc;
 
 pub struct RDMA {
     // ...
@@ -10,6 +9,7 @@ pub struct RDMA {
     pub(crate) listen_id: *mut rdma_cm_id,
     pub is_server: bool,
     pub init_attr: ibv_qp_init_attr,
+    pub send_flags: u32,
 }
 
 impl RDMA {
@@ -30,6 +30,9 @@ pub struct RdmaMr(pub *mut rdma_sys::ibv_mr);
 unsafe impl Send for RdmaMr {}
 unsafe impl Sync for RdmaMr {}
 
+pub struct RdmaIbvWc (pub *mut rdma_sys::ibv_wc);
+unsafe impl Send for RdmaIbvWc {}
+unsafe impl Sync for RdmaIbvWc {}
 impl Default for RDMA {
     fn default() -> Self {
         Self {
@@ -38,6 +41,7 @@ impl Default for RDMA {
             listen_id: null_mut(),
             is_server: false,
             init_attr: unsafe { std::mem::zeroed::<ibv_qp_init_attr>() },
+            send_flags: 0,
         }
     }
 }
