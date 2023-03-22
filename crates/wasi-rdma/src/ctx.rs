@@ -7,7 +7,7 @@ use wiggle::GuestPtr;
 use crate::guest_types::IbvWc;
 use crate::guest_types::RdmaError::RuntimeError;
 use crate::guest_types::{IbvMr, IbvQpCap, Rdma, RdmaAddrinfoStruct, RdmaError};
-use crate::rdma::{RdmaMr, RDMA};
+use crate::rdma::{RdmaIbvWc, RdmaMr, RDMA};
 use crate::table;
 use crate::witx::wasi_ephemeral_rdma::WasiEphemeralRdma;
 
@@ -50,11 +50,11 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             return Err(RdmaError::RuntimeError);
         }
         let mut id: *mut rdma_cm_id = null_mut();
-        let mut listen_id: *mut rdma_cm_id = null_mut();
         // Safety: ffi
         let mut init_attr = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
         init_attr.cap = cap.into();
-        init_attr.qp_context = id.cast();
+        //todo: qp_context?
+        // init_attr.qp_context = id.cast();
         init_attr.sq_sig_all = 1;
         ret = unsafe { rdma_create_ep(&mut id, info, null_mut(), &mut init_attr) };
         if ret != 0 {
@@ -69,23 +69,26 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let mut rdma = RDMA::default();
         if is_server != 0 {
             rdma.is_server = true;
-            ret = unsafe { rdma_listen(listen_id, 0) };
-            rdma.listen_id = listen_id;
+            ret = unsafe { rdma_listen(id, 0) };
+            rdma.listen_id = id;
             if ret != 0 {
                 unsafe {
-                    rdma_destroy_ep(listen_id);
+                    rdma_destroy_ep(id);
                 }
                 return Err(RuntimeError);
             }
-            ret = unsafe { rdma_get_request(listen_id, &mut id) };
+            let mut _listen_id: *mut rdma_cm_id = null_mut();
+            ret = unsafe { rdma_get_request(id, &mut _listen_id) };
             if ret != 0 {
                 unsafe {
-                    rdma_destroy_ep(listen_id);
+                    rdma_destroy_ep(id);
                 }
                 return Err(RuntimeError);
             }
+            rdma.id = _listen_id;
+        } else {
+            rdma.id = id;
         }
-        rdma.id = id;
         rdma.init_attr = init_attr;
 
         // Safety: ffi
@@ -121,13 +124,72 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         unsafe { rdma_disconnect(id) };
         Ok(())
     }
+    fn rdma_accept(&mut self, rdma: Rdma) -> Result<(), RdmaError> {
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        let id = rdma.id()?;
+        let ret = unsafe { rdma_accept(id, null_mut()) };
+        if ret != 0 {
+            return Err(RuntimeError);
+        }
+        Ok(())
+    }
+    fn rdma_send_flags(&mut self, rdma: Rdma) -> Result<u32, RdmaError> {
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        Ok(rdma.send_flags)
+    }
 
     fn rdma_get_send_comp(&mut self, rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
-        todo!()
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        let id = rdma.id()?;
+        //if ibv_wc is NULL,set to 0;
+        let mut ibv_wc_: *mut ibv_wc = if wc == 0.into() {
+            unsafe { null_mut() }
+        } else {
+            self.table
+                .get_mut::<RdmaIbvWc>(wc.into())
+                .map_err(|_| RuntimeError)?
+                .0
+        };
+        let ret = unsafe { rdma_get_send_comp(id, ibv_wc_) };
+        if ret != 0 {
+            return Err(RuntimeError);
+        }
+        if wc == 0.into() {
+            Ok(self
+                .table
+                .push(Arc::new(RdmaIbvWc(ibv_wc_)))
+                .map_err(|_| RuntimeError)?
+                .into())
+        } else {
+            Ok(wc)
+        }
     }
 
     fn rdma_get_recv_comp(&mut self, rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
-        todo!()
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        let id = rdma.id()?;
+        //if ibv_wc is NULL,set to 0;
+        let mut ibv_wc_: *mut ibv_wc = if wc == 0.into() {
+            unsafe { null_mut() }
+        } else {
+            self.table
+                .get_mut::<RdmaIbvWc>(wc.into())
+                .map_err(|_| RuntimeError)?
+                .0
+        };
+        let ret = unsafe { rdma_get_recv_comp(id, ibv_wc_) };
+        if ret != 0 {
+            return Err(RuntimeError);
+        }
+        if wc == 0.into() {
+            Ok(self
+                .table
+                .push(Arc::new(RdmaIbvWc(ibv_wc_)))
+                .map_err(|_| RuntimeError)?
+                .into())
+        } else {
+            Ok(wc)
+        }
     }
 
     fn rdma_reg_msgs<'a>(
@@ -141,11 +203,15 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             println!("No Support for Shared Memory!");
             return Err(RuntimeError);
         }
+        let mut addr = addr
+            .as_array(size)
+            .as_slice_mut()
+            .map_err(|_| RuntimeError)?.ok_or_else(|| RuntimeError)?;
+
         let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
-        let addr =
-            unsafe { addr.mem().base().as_ptr().offset(addr.offset() as isize) } as *mut c_void;
+
         let id = rdma.id()?;
-        let mr = unsafe { rdma_reg_msgs(id, addr, size as usize) };
+        let mr = unsafe { rdma_reg_msgs(id, addr.as_mut_ptr().cast(), size as usize) };
         if mr.is_null() {
             unsafe { rdma_dereg_mr(mr) };
             return Err(RuntimeError);
@@ -208,6 +274,11 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
                 rdma_destroy_ep(id);
             }
             return Err(RuntimeError);
+        }
+        if rdma.init_attr.cap.max_inline_data >= 16 {
+            rdma.send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
+        } else {
+            println!("rdma_server: device doesn't support IBV_SEND_INLINE, using sge sends");
         }
         Ok(())
     }
