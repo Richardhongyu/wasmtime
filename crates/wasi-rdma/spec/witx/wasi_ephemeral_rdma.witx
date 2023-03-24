@@ -9,7 +9,7 @@
 (typename $ibv_mr (handle))
 
 (typename $ibv_wc (handle))
-
+(typename $ibv_send_flag u32)
 ;;;(typename $conn_param (handle))
 (typename $rdma_addrinfo_struct
   (record
@@ -66,10 +66,17 @@
   (@interface func (export "rdma_get_send_comp")
     (param $rdma $rdma)
     (param $wc $ibv_wc)
-
     (result $error (expected $ibv_wc (error $rdma_error)))
   )
-
+  (@interface func (export "rdma_accept")
+    (param $rdma $rdma)
+    (result $error (expected (error $rdma_error)))
+  )
+  (@interface func (export "rdma_send_flags")
+    (param $rdma $rdma)
+    (result $error (expected $ibv_send_flag (error $rdma_error)))
+  )
+    
   (@interface func (export "rdma_get_recv_comp")
     (param $rdma $rdma)
     (param $wc $ibv_wc)
@@ -104,11 +111,10 @@
     (param $addr (@witx pointer u8))
     (param $size u32)
     (param $recv_mr $ibv_mr)
-    (param $flags u32)
 
     (result $error (expected (error $rdma_error)))
   )
-  
+
   (@interface func (export "ibv_query_qp")
     (param $rdma $rdma)
     (param $ibv_qp_attrmask u32)
