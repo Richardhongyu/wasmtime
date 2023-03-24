@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 cap-std = "1.0.7"
 # tokio = "1.26.0"
-wasi-rdma = { path = "../wasi-rdma"}
+wasi-rdma = { path = "../wasi-rdma", version = "0.1.0"}
 
 #[dependencies.tokio]
 #version = "1.15"

@@ -30,7 +30,7 @@ pub struct RdmaMr(pub *mut rdma_sys::ibv_mr);
 unsafe impl Send for RdmaMr {}
 unsafe impl Sync for RdmaMr {}
 
-pub struct RdmaIbvWc (pub *mut rdma_sys::ibv_wc);
+pub struct RdmaIbvWc(pub *mut rdma_sys::ibv_wc);
 unsafe impl Send for RdmaIbvWc {}
 unsafe impl Sync for RdmaIbvWc {}
 impl Default for RDMA {

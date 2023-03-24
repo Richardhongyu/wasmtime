@@ -8,6 +8,21 @@ the `wasi-rdma` feature is enabled defaultly for now, so you can just compile wa
 cargo build
 ```
 
+## generate the bindings
+
+generate the user called bindings for the `wasi_ephemeral_rdma` interface
+```
+see [../examples/wasi-rdma/README.md] for more details
+```
+<!-- ```bash
+witx-bindgen --language rust --output binding/lib_generated.rs src/wasi_ephemeral_rdma.witx
+``` -->
+
+expand the wiggle bindings for the `wasi_ephemeral_rdma` interface
+```bash
+cargo expand witx > ./src/binding/_macro_expanded_lib.rs
+```
+
 ## run the example 
 
 edit the `greeting.wat` file

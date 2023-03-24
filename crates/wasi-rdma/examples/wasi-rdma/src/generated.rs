@@ -44,6 +44,7 @@ impl fmt::Debug for RdmaError {
 
 pub type IbvMr = u32;
 pub type IbvWc = u32;
+pub type IbvSendFlag = u32;
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct RdmaAddrinfoStruct {
@@ -112,6 +113,25 @@ pub unsafe fn rdma_get_send_comp(rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaErr
         wasi_ephemeral_rdma::rdma_get_send_comp(rdma as i32, wc as i32, rp0.as_mut_ptr() as i32);
     match ret {
         0 => Ok(core::ptr::read(rp0.as_mut_ptr() as i32 as *const IbvWc)),
+        _ => Err(RdmaError(ret as u16)),
+    }
+}
+
+pub unsafe fn rdma_accept(rdma: Rdma) -> Result<(), RdmaError> {
+    let ret = wasi_ephemeral_rdma::rdma_accept(rdma as i32);
+    match ret {
+        0 => Ok(()),
+        _ => Err(RdmaError(ret as u16)),
+    }
+}
+
+pub unsafe fn rdma_send_flags(rdma: Rdma) -> Result<IbvSendFlag, RdmaError> {
+    let mut rp0 = MaybeUninit::<IbvSendFlag>::uninit();
+    let ret = wasi_ephemeral_rdma::rdma_send_flags(rdma as i32, rp0.as_mut_ptr() as i32);
+    match ret {
+        0 => Ok(core::ptr::read(
+            rp0.as_mut_ptr() as i32 as *const IbvSendFlag
+        )),
         _ => Err(RdmaError(ret as u16)),
     }
 }
@@ -206,6 +226,8 @@ pub mod wasi_ephemeral_rdma {
         pub fn rdma_connect(arg0: i32) -> i32;
         pub fn rdma_disconnect(arg0: i32) -> i32;
         pub fn rdma_get_send_comp(arg0: i32, arg1: i32, arg2: i32) -> i32;
+        pub fn rdma_accept(arg0: i32) -> i32;
+        pub fn rdma_send_flags(arg0: i32, arg1: i32) -> i32;
         pub fn rdma_get_recv_comp(arg0: i32, arg1: i32, arg2: i32) -> i32;
         pub fn rdma_reg_msgs(arg0: i32, arg1: i32, arg2: i32, arg3: i32) -> i32;
         pub fn rdma_dereg_mr(arg0: i32);

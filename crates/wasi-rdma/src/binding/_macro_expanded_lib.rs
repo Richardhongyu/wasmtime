@@ -310,6 +310,7 @@ mod witx {
                 u32::write(&location.cast(), val.0)
             }
         }
+        pub type IbvSendFlag = u32;
         pub struct RdmaAddrinfoStruct {
             pub flags: i32,
             pub port_space: i32,
@@ -1695,6 +1696,385 @@ mod witx {
                 })
         }
         #[allow(unreachable_code)]
+        pub fn rdma_accept<'a>(
+            ctx: &'a mut (impl WasiEphemeralRdma),
+            memory: &dyn wiggle::GuestMemory,
+            arg0: i32,
+        ) -> wiggle::anyhow::Result<i32> {
+            use std::convert::TryFrom as _;
+            let _span = {
+                use ::tracing::__macro_support::Callsite as _;
+                static CALLSITE: ::tracing::__macro_support::MacroCallsite = {
+                    use ::tracing::__macro_support::MacroCallsite;
+                    static META: ::tracing::Metadata<'static> = {
+                        ::tracing_core::metadata::Metadata::new(
+                            "wiggle abi",
+                            "wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma",
+                            wiggle::tracing::Level::TRACE,
+                            Some("crates/wasi-rdma/src/witx.rs"),
+                            Some(1u32),
+                            Some("wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma"),
+                            ::tracing_core::field::FieldSet::new(
+                                &["module", "function"],
+                                ::tracing_core::callsite::Identifier(&CALLSITE),
+                            ),
+                            ::tracing::metadata::Kind::SPAN,
+                        )
+                    };
+                    MacroCallsite::new(&META)
+                };
+                let mut interest = ::tracing::subscriber::Interest::never();
+                if wiggle::tracing::Level::TRACE
+                    <= ::tracing::level_filters::STATIC_MAX_LEVEL
+                    && wiggle::tracing::Level::TRACE
+                        <= ::tracing::level_filters::LevelFilter::current()
+                    && {
+                        interest = CALLSITE.interest();
+                        !interest.is_never()
+                    } && CALLSITE.is_enabled(interest)
+                {
+                    let meta = CALLSITE.metadata();
+                    ::tracing::Span::new(
+                        meta,
+                        &{
+                            #[allow(unused_imports)]
+                            use ::tracing::field::{debug, display, Value};
+                            let mut iter = meta.fields().iter();
+                            meta.fields()
+                                .value_set(
+                                    &[
+                                        (
+                                            &iter.next().expect("FieldSet corrupted (this is a bug)"),
+                                            Some(&"wasi_ephemeral_rdma" as &Value),
+                                        ),
+                                        (
+                                            &iter.next().expect("FieldSet corrupted (this is a bug)"),
+                                            Some(&"rdma_accept" as &Value),
+                                        ),
+                                    ],
+                                )
+                        },
+                    )
+                } else {
+                    let span = CALLSITE.disabled_span();
+                    {};
+                    span
+                }
+            };
+            _span
+                .in_scope(|| {
+                    let rdma = Rdma::from(arg0);
+                    {
+                        use ::tracing::__macro_support::Callsite as _;
+                        static CALLSITE: ::tracing::__macro_support::MacroCallsite = {
+                            use ::tracing::__macro_support::MacroCallsite;
+                            static META: ::tracing::Metadata<'static> = {
+                                ::tracing_core::metadata::Metadata::new(
+                                    "event crates/wasi-rdma/src/witx.rs:1",
+                                    "wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma",
+                                    wiggle::tracing::Level::TRACE,
+                                    Some("crates/wasi-rdma/src/witx.rs"),
+                                    Some(1u32),
+                                    Some("wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma"),
+                                    ::tracing_core::field::FieldSet::new(
+                                        &["rdma"],
+                                        ::tracing_core::callsite::Identifier(&CALLSITE),
+                                    ),
+                                    ::tracing::metadata::Kind::EVENT,
+                                )
+                            };
+                            MacroCallsite::new(&META)
+                        };
+                        let enabled = wiggle::tracing::Level::TRACE
+                            <= ::tracing::level_filters::STATIC_MAX_LEVEL
+                            && wiggle::tracing::Level::TRACE
+                                <= ::tracing::level_filters::LevelFilter::current()
+                            && {
+                                let interest = CALLSITE.interest();
+                                !interest.is_never() && CALLSITE.is_enabled(interest)
+                            };
+                        if enabled {
+                            (|value_set: ::tracing::field::ValueSet| {
+                                let meta = CALLSITE.metadata();
+                                ::tracing::Event::dispatch(meta, &value_set);
+                            })({
+                                #[allow(unused_imports)]
+                                use ::tracing::field::{debug, display, Value};
+                                let mut iter = CALLSITE.metadata().fields().iter();
+                                CALLSITE
+                                    .metadata()
+                                    .fields()
+                                    .value_set(
+                                        &[
+                                            (
+                                                &iter.next().expect("FieldSet corrupted (this is a bug)"),
+                                                Some(&wiggle::tracing::field::display(&rdma) as &Value),
+                                            ),
+                                        ],
+                                    )
+                            });
+                        } else {
+                        }
+                    };
+                    let ret = WasiEphemeralRdma::rdma_accept(ctx, rdma);
+                    {
+                        use ::tracing::__macro_support::Callsite as _;
+                        static CALLSITE: ::tracing::__macro_support::MacroCallsite = {
+                            use ::tracing::__macro_support::MacroCallsite;
+                            static META: ::tracing::Metadata<'static> = {
+                                ::tracing_core::metadata::Metadata::new(
+                                    "event crates/wasi-rdma/src/witx.rs:1",
+                                    "wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma",
+                                    wiggle::tracing::Level::TRACE,
+                                    Some("crates/wasi-rdma/src/witx.rs"),
+                                    Some(1u32),
+                                    Some("wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma"),
+                                    ::tracing_core::field::FieldSet::new(
+                                        &["result"],
+                                        ::tracing_core::callsite::Identifier(&CALLSITE),
+                                    ),
+                                    ::tracing::metadata::Kind::EVENT,
+                                )
+                            };
+                            MacroCallsite::new(&META)
+                        };
+                        let enabled = wiggle::tracing::Level::TRACE
+                            <= ::tracing::level_filters::STATIC_MAX_LEVEL
+                            && wiggle::tracing::Level::TRACE
+                                <= ::tracing::level_filters::LevelFilter::current()
+                            && {
+                                let interest = CALLSITE.interest();
+                                !interest.is_never() && CALLSITE.is_enabled(interest)
+                            };
+                        if enabled {
+                            (|value_set: ::tracing::field::ValueSet| {
+                                let meta = CALLSITE.metadata();
+                                ::tracing::Event::dispatch(meta, &value_set);
+                            })({
+                                #[allow(unused_imports)]
+                                use ::tracing::field::{debug, display, Value};
+                                let mut iter = CALLSITE.metadata().fields().iter();
+                                CALLSITE
+                                    .metadata()
+                                    .fields()
+                                    .value_set(
+                                        &[
+                                            (
+                                                &iter.next().expect("FieldSet corrupted (this is a bug)"),
+                                                Some(&wiggle::tracing::field::debug(&ret) as &Value),
+                                            ),
+                                        ],
+                                    )
+                            });
+                        } else {
+                        }
+                    };
+                    return Ok(
+                        match ret {
+                            Ok(e) => {
+                                <RdmaError as wiggle::GuestErrorType>::success() as i32
+                            }
+                            Err(e) => e as i32,
+                        },
+                    );
+                })
+        }
+        #[allow(unreachable_code)]
+        pub fn rdma_send_flags<'a>(
+            ctx: &'a mut (impl WasiEphemeralRdma),
+            memory: &dyn wiggle::GuestMemory,
+            arg0: i32,
+            arg1: i32,
+        ) -> wiggle::anyhow::Result<i32> {
+            use std::convert::TryFrom as _;
+            let _span = {
+                use ::tracing::__macro_support::Callsite as _;
+                static CALLSITE: ::tracing::__macro_support::MacroCallsite = {
+                    use ::tracing::__macro_support::MacroCallsite;
+                    static META: ::tracing::Metadata<'static> = {
+                        ::tracing_core::metadata::Metadata::new(
+                            "wiggle abi",
+                            "wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma",
+                            wiggle::tracing::Level::TRACE,
+                            Some("crates/wasi-rdma/src/witx.rs"),
+                            Some(1u32),
+                            Some("wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma"),
+                            ::tracing_core::field::FieldSet::new(
+                                &["module", "function"],
+                                ::tracing_core::callsite::Identifier(&CALLSITE),
+                            ),
+                            ::tracing::metadata::Kind::SPAN,
+                        )
+                    };
+                    MacroCallsite::new(&META)
+                };
+                let mut interest = ::tracing::subscriber::Interest::never();
+                if wiggle::tracing::Level::TRACE
+                    <= ::tracing::level_filters::STATIC_MAX_LEVEL
+                    && wiggle::tracing::Level::TRACE
+                        <= ::tracing::level_filters::LevelFilter::current()
+                    && {
+                        interest = CALLSITE.interest();
+                        !interest.is_never()
+                    } && CALLSITE.is_enabled(interest)
+                {
+                    let meta = CALLSITE.metadata();
+                    ::tracing::Span::new(
+                        meta,
+                        &{
+                            #[allow(unused_imports)]
+                            use ::tracing::field::{debug, display, Value};
+                            let mut iter = meta.fields().iter();
+                            meta.fields()
+                                .value_set(
+                                    &[
+                                        (
+                                            &iter.next().expect("FieldSet corrupted (this is a bug)"),
+                                            Some(&"wasi_ephemeral_rdma" as &Value),
+                                        ),
+                                        (
+                                            &iter.next().expect("FieldSet corrupted (this is a bug)"),
+                                            Some(&"rdma_send_flags" as &Value),
+                                        ),
+                                    ],
+                                )
+                        },
+                    )
+                } else {
+                    let span = CALLSITE.disabled_span();
+                    {};
+                    span
+                }
+            };
+            _span
+                .in_scope(|| {
+                    let rdma = Rdma::from(arg0);
+                    {
+                        use ::tracing::__macro_support::Callsite as _;
+                        static CALLSITE: ::tracing::__macro_support::MacroCallsite = {
+                            use ::tracing::__macro_support::MacroCallsite;
+                            static META: ::tracing::Metadata<'static> = {
+                                ::tracing_core::metadata::Metadata::new(
+                                    "event crates/wasi-rdma/src/witx.rs:1",
+                                    "wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma",
+                                    wiggle::tracing::Level::TRACE,
+                                    Some("crates/wasi-rdma/src/witx.rs"),
+                                    Some(1u32),
+                                    Some("wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma"),
+                                    ::tracing_core::field::FieldSet::new(
+                                        &["rdma"],
+                                        ::tracing_core::callsite::Identifier(&CALLSITE),
+                                    ),
+                                    ::tracing::metadata::Kind::EVENT,
+                                )
+                            };
+                            MacroCallsite::new(&META)
+                        };
+                        let enabled = wiggle::tracing::Level::TRACE
+                            <= ::tracing::level_filters::STATIC_MAX_LEVEL
+                            && wiggle::tracing::Level::TRACE
+                                <= ::tracing::level_filters::LevelFilter::current()
+                            && {
+                                let interest = CALLSITE.interest();
+                                !interest.is_never() && CALLSITE.is_enabled(interest)
+                            };
+                        if enabled {
+                            (|value_set: ::tracing::field::ValueSet| {
+                                let meta = CALLSITE.metadata();
+                                ::tracing::Event::dispatch(meta, &value_set);
+                            })({
+                                #[allow(unused_imports)]
+                                use ::tracing::field::{debug, display, Value};
+                                let mut iter = CALLSITE.metadata().fields().iter();
+                                CALLSITE
+                                    .metadata()
+                                    .fields()
+                                    .value_set(
+                                        &[
+                                            (
+                                                &iter.next().expect("FieldSet corrupted (this is a bug)"),
+                                                Some(&wiggle::tracing::field::display(&rdma) as &Value),
+                                            ),
+                                        ],
+                                    )
+                            });
+                        } else {
+                        }
+                    };
+                    let ret = WasiEphemeralRdma::rdma_send_flags(ctx, rdma);
+                    {
+                        use ::tracing::__macro_support::Callsite as _;
+                        static CALLSITE: ::tracing::__macro_support::MacroCallsite = {
+                            use ::tracing::__macro_support::MacroCallsite;
+                            static META: ::tracing::Metadata<'static> = {
+                                ::tracing_core::metadata::Metadata::new(
+                                    "event crates/wasi-rdma/src/witx.rs:1",
+                                    "wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma",
+                                    wiggle::tracing::Level::TRACE,
+                                    Some("crates/wasi-rdma/src/witx.rs"),
+                                    Some(1u32),
+                                    Some("wasmtime_wasi_rdma::witx::wasi_ephemeral_rdma"),
+                                    ::tracing_core::field::FieldSet::new(
+                                        &["result"],
+                                        ::tracing_core::callsite::Identifier(&CALLSITE),
+                                    ),
+                                    ::tracing::metadata::Kind::EVENT,
+                                )
+                            };
+                            MacroCallsite::new(&META)
+                        };
+                        let enabled = wiggle::tracing::Level::TRACE
+                            <= ::tracing::level_filters::STATIC_MAX_LEVEL
+                            && wiggle::tracing::Level::TRACE
+                                <= ::tracing::level_filters::LevelFilter::current()
+                            && {
+                                let interest = CALLSITE.interest();
+                                !interest.is_never() && CALLSITE.is_enabled(interest)
+                            };
+                        if enabled {
+                            (|value_set: ::tracing::field::ValueSet| {
+                                let meta = CALLSITE.metadata();
+                                ::tracing::Event::dispatch(meta, &value_set);
+                            })({
+                                #[allow(unused_imports)]
+                                use ::tracing::field::{debug, display, Value};
+                                let mut iter = CALLSITE.metadata().fields().iter();
+                                CALLSITE
+                                    .metadata()
+                                    .fields()
+                                    .value_set(
+                                        &[
+                                            (
+                                                &iter.next().expect("FieldSet corrupted (this is a bug)"),
+                                                Some(&wiggle::tracing::field::debug(&ret) as &Value),
+                                            ),
+                                        ],
+                                    )
+                            });
+                        } else {
+                        }
+                    };
+                    return Ok(
+                        match ret {
+                            Ok(e) => {
+                                wiggle::GuestPtr::<IbvSendFlag>::new(memory, arg1 as u32)
+                                    .write(e)
+                                    .map_err(|e| {
+                                        wiggle::GuestError::InFunc {
+                                            modulename: "wasi_ephemeral_rdma",
+                                            funcname: "rdma_send_flags",
+                                            location: "write ibv_send_flag",
+                                            err: Box::new(wiggle::GuestError::from(e)),
+                                        }
+                                    })?;
+                                <RdmaError as wiggle::GuestErrorType>::success() as i32
+                            }
+                            Err(e) => e as i32,
+                        },
+                    );
+                })
+        }
+        #[allow(unreachable_code)]
         pub fn rdma_get_recv_comp<'a>(
             ctx: &'a mut (impl WasiEphemeralRdma),
             memory: &dyn wiggle::GuestMemory,
@@ -3037,6 +3417,8 @@ mod witx {
                 rdma: Rdma,
                 wc: IbvWc,
             ) -> Result<IbvWc, RdmaError>;
+            fn rdma_accept(&mut self, rdma: Rdma) -> Result<(), RdmaError>;
+            fn rdma_send_flags(&mut self, rdma: Rdma) -> Result<IbvSendFlag, RdmaError>;
             fn rdma_get_recv_comp(
                 &mut self,
                 rdma: Rdma,
@@ -3237,6 +3619,75 @@ mod witx {
                             }
                         };
                         Ok(<i32>::from(rdma_get_send_comp(ctx, &mem, arg0, arg1, arg2)?))
+                    },
+                )?;
+            linker
+                .func_wrap(
+                    "wasi_ephemeral_rdma",
+                    "rdma_accept",
+                    move |
+                        mut caller: wiggle::wasmtime_crate::Caller<'_, T>,
+                        arg0: i32,
+                    | -> wiggle::anyhow::Result<i32> {
+                        let export = caller.get_export("memory");
+                        let (mem, ctx) = match &export {
+                            Some(wiggle::wasmtime_crate::Extern::Memory(m)) => {
+                                let (mem, ctx) = m.data_and_store_mut(&mut caller);
+                                let ctx = get_cx(ctx);
+                                (wiggle::wasmtime::WasmtimeGuestMemory::new(mem), ctx)
+                            }
+                            Some(wiggle::wasmtime_crate::Extern::SharedMemory(m)) => {
+                                let ctx = get_cx(caller.data_mut());
+                                (
+                                    wiggle::wasmtime::WasmtimeGuestMemory::shared(m.data()),
+                                    ctx,
+                                )
+                            }
+                            _ => {
+                                return ::anyhow::__private::Err({
+                                    let error = ::anyhow::__private::format_err(
+                                        format_args!("missing required memory export"),
+                                    );
+                                    error
+                                });
+                            }
+                        };
+                        Ok(<i32>::from(rdma_accept(ctx, &mem, arg0)?))
+                    },
+                )?;
+            linker
+                .func_wrap(
+                    "wasi_ephemeral_rdma",
+                    "rdma_send_flags",
+                    move |
+                        mut caller: wiggle::wasmtime_crate::Caller<'_, T>,
+                        arg0: i32,
+                        arg1: i32,
+                    | -> wiggle::anyhow::Result<i32> {
+                        let export = caller.get_export("memory");
+                        let (mem, ctx) = match &export {
+                            Some(wiggle::wasmtime_crate::Extern::Memory(m)) => {
+                                let (mem, ctx) = m.data_and_store_mut(&mut caller);
+                                let ctx = get_cx(ctx);
+                                (wiggle::wasmtime::WasmtimeGuestMemory::new(mem), ctx)
+                            }
+                            Some(wiggle::wasmtime_crate::Extern::SharedMemory(m)) => {
+                                let ctx = get_cx(caller.data_mut());
+                                (
+                                    wiggle::wasmtime::WasmtimeGuestMemory::shared(m.data()),
+                                    ctx,
+                                )
+                            }
+                            _ => {
+                                return ::anyhow::__private::Err({
+                                    let error = ::anyhow::__private::format_err(
+                                        format_args!("missing required memory export"),
+                                    );
+                                    error
+                                });
+                            }
+                        };
+                        Ok(<i32>::from(rdma_send_flags(ctx, &mem, arg0, arg1)?))
                     },
                 )?;
             linker

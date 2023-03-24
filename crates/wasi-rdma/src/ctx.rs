@@ -207,7 +207,8 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let mut addr = addr
             .as_array(size)
             .as_slice_mut()
-            .map_err(|_| RuntimeError)?.ok_or_else(|| RuntimeError)?;
+            .map_err(|_| RuntimeError)?
+            .ok_or_else(|| RuntimeError)?;
 
         let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
 
