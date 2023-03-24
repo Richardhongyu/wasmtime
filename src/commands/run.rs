@@ -12,7 +12,12 @@ use wasmtime_cli_flags::{CommonOptions, WasiModules};
 use wasmtime_wasi::maybe_exit_on_error;
 use wasmtime_wasi::sync::{ambient_authority, Dir, TcpListener, WasiCtxBuilder};
 
-#[cfg(any(feature = "wasi-crypto", feature = "wasi-nn", feature = "wasi-threads", feature = "wasi-rdma"))]
+#[cfg(any(
+    feature = "wasi-crypto",
+    feature = "wasi-nn",
+    feature = "wasi-threads",
+    feature = "wasi-rdma"
+))]
 use std::sync::Arc;
 
 #[cfg(feature = "wasi-nn")]

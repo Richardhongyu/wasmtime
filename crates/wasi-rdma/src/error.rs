@@ -2,7 +2,7 @@ use crate::RdmaError;
 use wiggle::GuestError;
 
 impl From<GuestError> for RdmaError {
-    fn from(value: GuestError) -> Self {
+    fn from(_value: GuestError) -> Self {
         // match value {
         //     GuestError::InvalidFlagValue(_) => {}
         //     GuestError::InvalidEnumValue(_) => {}

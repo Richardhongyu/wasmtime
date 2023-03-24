@@ -10,18 +10,18 @@ use crate::{
     },
     I32Exit, SystemTimeSpec, WasiCtx,
 };
-use async_rdma::{LocalMrReadAccess, LocalMrWriteAccess, RdmaBuilder, Rdma};
+use async_rdma::{LocalMrReadAccess, LocalMrWriteAccess, Rdma, RdmaBuilder};
+use cap_std::time::{Duration, SystemClock};
 use portpicker::pick_unused_port;
+use std::convert::{TryFrom, TryInto};
+use std::io::{IoSlice, IoSliceMut};
+use std::ops::Deref;
+use std::sync::Arc;
 use std::{
     alloc::Layout,
     io::{self, Write},
     net::{Ipv4Addr, SocketAddrV4},
 };
-use cap_std::time::{Duration, SystemClock};
-use std::convert::{TryFrom, TryInto};
-use std::io::{IoSlice, IoSliceMut};
-use std::ops::Deref;
-use std::sync::Arc;
 use wiggle::GuestPtr;
 
 pub mod error;
@@ -1309,9 +1309,9 @@ async fn new_test() {
     println!("rdma_client: start");
     // let args: Vec<String> = env::args().collect();
     // if args.len() != 3 {
-        // println!("usage : cargo run --example client <server_ip> <port>");
-        // println!("input : {:?}", args);
-        // exit(-1);
+    // println!("usage : cargo run --example client <server_ip> <port>");
+    // println!("input : {:?}", args);
+    // exit(-1);
     // }
     // let ip = args.get( 1).unwrap().as_str();
     // let port = args.get(2).unwrap().as_str();
@@ -1337,9 +1337,6 @@ async fn new_test() {
         }
     }
     println!("rdma_client: end");
-
-
-
 }
 
 fn server_runs() {

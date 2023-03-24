@@ -2,6 +2,7 @@ use rdma_sys::*;
 use std::os::raw::{c_int, c_void};
 use std::ptr::null_mut;
 use std::sync::Arc;
+
 use wiggle::GuestPtr;
 
 use crate::guest_types::IbvWc;
@@ -32,7 +33,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         cap: &IbvQpCap,
         is_server: u8,
     ) -> Result<Rdma, RdmaError> {
-        let mut hint: rdma_addrinfo = unsafe { hints.into() };
+        let mut hint: rdma_addrinfo = hints.into();
         let mut info: *mut rdma_addrinfo = null_mut();
         hint.ai_port_space = rdma_port_space::RDMA_PS_TCP as c_int;
         // Safety: ffi
@@ -50,7 +51,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             return Err(RdmaError::RuntimeError);
         }
         let mut id: *mut rdma_cm_id = null_mut();
-        let mut listen_id: *mut rdma_cm_id = null_mut();
+        let listen_id: *mut rdma_cm_id = null_mut();
         // Safety: ffi
         let mut init_attr = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
         init_attr.cap = cap.into();
@@ -122,11 +123,11 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         Ok(())
     }
 
-    fn rdma_get_send_comp(&mut self, rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
+    fn rdma_get_send_comp(&mut self, _rdma: Rdma, _wc: IbvWc) -> Result<IbvWc, RdmaError> {
         todo!()
     }
 
-    fn rdma_get_recv_comp(&mut self, rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
+    fn rdma_get_recv_comp(&mut self, _rdma: Rdma, _wc: IbvWc) -> Result<IbvWc, RdmaError> {
         todo!()
     }
 
@@ -171,25 +172,74 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         &mut self,
         rdma: Rdma,
         addr: &GuestPtr<'a, u8>,
-        size: u32,
+        _size: u32,
         send_mr: IbvMr,
         flags: u32,
     ) -> Result<(), RdmaError> {
-        todo!()
+        let rdma: &mut RDMA = self
+            .table
+            .get_mut::<RDMA>(rdma.into())
+            .map_err(|_| RuntimeError)?;
+        let id = rdma.id()?;
+        let send_msg = unsafe { addr.mem().base().as_ptr().offset(addr.offset() as isize) };
+        let send_mr = self
+            .table
+            .get_mut::<RdmaMr>(send_mr.into())
+            .map_err(|_| RuntimeError)?
+            .0;
+
+        let ret = unsafe {
+            rdma_post_send(
+                id,
+                null_mut(),
+                send_msg as *mut c_void,
+                16,
+                send_mr,
+                flags as i32,
+            )
+        };
+        if ret != 0 {
+            println!("rdma_post_send");
+            unsafe {
+                rdma_disconnect(id);
+            }
+            return Err(RuntimeError);
+        }
+        Ok(())
     }
 
     fn rdma_post_recv<'a>(
         &mut self,
         rdma: Rdma,
         addr: &GuestPtr<'a, u8>,
-        size: u32,
+        _size: u32,
         recv_mr: IbvMr,
+        send_flags: u32,
     ) -> Result<(), RdmaError> {
-        todo!()
+        let rdma = self
+            .table
+            .get_mut::<RDMA>(rdma.into())
+            .map_err(|_| RuntimeError)?;
+        let id = rdma.id()?;
+        let recv_msg = unsafe { addr.mem().base().as_ptr().offset(addr.offset() as isize) };
+        let mr = self
+            .table
+            .get_mut::<RdmaMr>(recv_mr.into())
+            .map_err(|_| RuntimeError)?
+            .0;
+        let ret = unsafe { rdma_post_recv(id, null_mut(), recv_msg as *mut c_void, 16, mr) };
+        if ret != 0 {
+            println!("rdma_post_recv");
+            if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) as u32 == 0 {
+                unsafe { rdma_dereg_mr(mr) };
+            }
+            return Err(RuntimeError);
+        }
+        Ok(())
     }
 
     fn ibv_query_qp(&mut self, rdma: Rdma, ibv_qp_attrmask: u32) -> Result<(), RdmaError> {
-        let mut rdma: &mut RDMA = self
+        let rdma: &mut RDMA = self
             .table
             .get_mut::<RDMA>(rdma.into())
             .map_err(|_| RuntimeError)?;

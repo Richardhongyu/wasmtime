@@ -104,6 +104,7 @@
     (param $addr (@witx pointer u8))
     (param $size u32)
     (param $recv_mr $ibv_mr)
+    (param $flags u32)
 
     (result $error (expected (error $rdma_error)))
   )

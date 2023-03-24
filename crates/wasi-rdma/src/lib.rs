@@ -4,7 +4,7 @@ mod rdma;
 mod table;
 mod witx;
 
-use anyhow::Result;
+
 pub use ctx::WasiRdmaCtx;
 pub use witx::types as guest_types;
 pub use witx::types::RdmaError;
