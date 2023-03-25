@@ -52,32 +52,32 @@ impl From<&RdmaAddrinfoStruct> for rdma_addrinfo {
         if s.flags > 0 {
             addrinfo.ai_flags = s.flags;
         } else {
-            println!("error flag ai_flags {}", s.flags)
+            println!("error flag ai_flags {}", s.flags);
         }
         if s.family > 0 {
             addrinfo.ai_family = s.family;
         } else {
-            println!("error flag ai_family {}", s.family)
+            println!("error flag ai_family {}", s.family);
         }
         if s.qp_type > 0 {
             addrinfo.ai_qp_type = s.qp_type;
         } else {
-            println!("error flag ai_qp_type {}", s.qp_type)
+            println!("error flag ai_qp_type {}", s.qp_type);
         }
         if s.port_space > 0 {
             addrinfo.ai_port_space = s.port_space;
         } else {
-            println!("error flag ai_port_space {}", s.port_space)
+            println!("error flag ai_port_space {}", s.port_space);
         }
         if s.src_len > 0 {
             addrinfo.ai_src_len = s.src_len;
         } else {
-            println!("error flag ai_src_len {}", s.src_len)
+            println!("error flag ai_src_len {}", s.src_len);
         }
         if s.dst_len > 0 {
             addrinfo.ai_dst_len = s.dst_len;
         } else {
-            println!("error flag ai_dst_len {}", s.dst_len)
+            println!("error flag ai_dst_len {}", s.dst_len);
         }
 
         addrinfo

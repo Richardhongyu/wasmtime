@@ -14,7 +14,8 @@ fn main() {
     // std::thread::spawn(move || server_runs(SERVER, PORT));
     // sleep for 1 second
     // std::thread::sleep(Duration::new(1, 0));
-    let _ret = client_runs(SERVER, PORT);
+    // let _ret = client_runs(SERVER, PORT);
+    let _ret = server_runs(SERVER, PORT);
     println!("End of rdma_test");
 }
 
@@ -88,34 +89,26 @@ fn client_run() -> i32 {
 
     let rdma = unsafe { wasi_rdma::rdma_init(SERVER, PORT, rdma_info, cap, 0).unwrap() };
 
-    println!("client");
     let mr =
         unsafe { wasi_rdma::rdma_reg_msgs(rdma, recv_msg.as_mut_ptr().cast(), 16).unwrap() };
 
-    println!("client");
     let send_mr =
         unsafe { wasi_rdma::rdma_reg_msgs(rdma, send_msg.as_mut_ptr().cast(), 16).unwrap() };
 
-    println!("client");
     let mut ret =
         unsafe { wasi_rdma::rdma_post_recv(rdma, recv_msg.as_mut_ptr().cast(), 16, mr).unwrap() };
 
-    println!("client");
     ret = unsafe { wasi_rdma::rdma_connect(rdma).unwrap() };
 
-    println!("client");
     ret = unsafe {
         wasi_rdma::rdma_post_send(rdma, send_msg.as_mut_ptr().cast(), 16, send_mr, send_flags).unwrap()
     };
 
-    println!("client");
     let wc = unsafe { wasi_rdma::rdma_get_send_comp(rdma, 0).unwrap() };
     let mut ret = 0;
-    println!("client end");
     while ret == 0 {
         ret = unsafe { wasi_rdma::rdma_get_send_comp(rdma, wc).unwrap() };
     }
-    println!("client");
     // TODO: fix the error handle
     // if ret < 0 {
     //     println!("rdma_get_send_comp");

@@ -33,12 +33,22 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         cap: &IbvQpCap,
         is_server: u8,
     ) -> Result<Rdma, RdmaError> {
+        println!("I'm in ");
         let mut hint: rdma_addrinfo = hints.into();
+        let mut hint = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
+        if is_server == 1 {
+            hint.ai_flags = RAI_PASSIVE.try_into().unwrap();
+        }
+        hint.ai_port_space = rdma_port_space::RDMA_PS_TCP as i32;
+        
+        println!("I'm in ");
         let mut info: *mut rdma_addrinfo = null_mut();
-        hint.ai_port_space = rdma_port_space::RDMA_PS_TCP as c_int;
+        // hint.ai_port_space = rdma_port_space::RDMA_PS_TCP as c_int;
         // Safety: ffi
+        println!("I'm in ");
         let node = node.as_str()?.ok_or(RdmaError::RuntimeError)?;
         let service = service.as_str()?.ok_or(RdmaError::RuntimeError)?;
+        println!("I'm in ");
         let mut ret = unsafe {
             rdma_getaddrinfo(
                 node.as_ptr().cast(),
@@ -47,17 +57,28 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
                 &mut info,
             )
         };
+        println!("I'm in ");
+        println!("I'm in {}", ret);
         if ret != 0_i32 {
             return Err(RdmaError::RuntimeError);
         }
         let mut id: *mut rdma_cm_id = null_mut();
         // Safety: ffi
+        println!("I'm in ");
         let mut init_attr = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
-        init_attr.cap = cap.into();
+        // init_attr.cap = cap.into();
+        init_attr.cap.max_send_wr = 1;
+        init_attr.cap.max_recv_wr = 1;
+        init_attr.cap.max_send_sge = 1;
+        init_attr.cap.max_recv_sge = 1;
+        init_attr.cap.max_inline_data = 16;
         //todo: qp_context?
-        // init_attr.qp_context = id.cast();
+        if is_server == 0 {
+            init_attr.qp_context = id.cast();
+        }
         init_attr.sq_sig_all = 1;
         ret = unsafe { rdma_create_ep(&mut id, info, null_mut(), &mut init_attr) };
+        println!("I'm in {}", ret);
         if ret != 0 {
             // Safety: ffi
             unsafe {
@@ -65,19 +86,22 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             }
             return Err(RuntimeError);
         }
-
+        println!("I'm in ");
         // Safety: id was initialized by `rdma_create_ep`
         let mut rdma = RDMA::default();
+        println!("I'm in ");
         if is_server != 0 {
             rdma.is_server = true;
             ret = unsafe { rdma_listen(id, 0) };
             rdma.listen_id = id;
+            println!("I'm in listen {} ", ret);
             if ret != 0 {
                 unsafe {
                     rdma_destroy_ep(id);
                 }
                 return Err(RuntimeError);
             }
+            println!("I'm in listen ");
             let mut _listen_id: *mut rdma_cm_id = null_mut();
             ret = unsafe { rdma_get_request(id, &mut _listen_id) };
             if ret != 0 {
@@ -86,14 +110,17 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
                 }
                 return Err(RuntimeError);
             }
+            println!("I'm in listen ");
             rdma.id = _listen_id;
         } else {
             rdma.id = id;
         }
+        println!("I'm in listen ");
         rdma.init_attr = init_attr;
 
         // Safety: ffi
 
+        println!("byebye");
         Ok(self
             .table
             .push(Arc::new(rdma))
@@ -141,27 +168,34 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
 
     fn rdma_get_send_comp(&mut self, rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
         let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        println!("error is here");
         let id = rdma.id()?;
         //if ibv_wc is NULL,set to 0;
+        println!("error is here");
         let ibv_wc_: *mut ibv_wc = if wc == 0.into() {
-            unsafe { null_mut() }
+            unsafe { (&mut std::mem::zeroed::<ibv_wc>()) as *mut ibv_wc }
         } else {
             self.table
                 .get_mut::<RdmaIbvWc>(wc.into())
                 .map_err(|_| RuntimeError)?
                 .0
         };
+        println!("error is here");
         let ret = unsafe { rdma_get_send_comp(id, ibv_wc_) };
+        println!("error is here ret is {}", ret);
         if ret != 0 {
             return Err(RuntimeError);
         }
+        println!("error is here");
         if wc == 0.into() {
+            println!("error is here");
             Ok(self
                 .table
                 .push(Arc::new(RdmaIbvWc(ibv_wc_)))
                 .map_err(|_| RuntimeError)?
                 .into())
         } else {
+            println!("error is here");
             Ok(wc)
         }
     }
