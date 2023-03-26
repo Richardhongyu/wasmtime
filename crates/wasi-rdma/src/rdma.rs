@@ -8,7 +8,7 @@ pub struct RDMA {
     pub(crate) id: *mut rdma_cm_id,
     pub(crate) listen_id: *mut rdma_cm_id,
     pub is_server: bool,
-    pub init_attr: ibv_qp_init_attr,
+    pub init_attr: Box<ibv_qp_init_attr>,
     pub send_flags: u32,
 }
 
@@ -30,7 +30,7 @@ pub struct RdmaMr(pub *mut rdma_sys::ibv_mr);
 unsafe impl Send for RdmaMr {}
 unsafe impl Sync for RdmaMr {}
 
-pub struct RdmaIbvWc(pub *mut rdma_sys::ibv_wc);
+pub struct RdmaIbvWc(pub Box<*mut rdma_sys::ibv_wc>);
 unsafe impl Send for RdmaIbvWc {}
 unsafe impl Sync for RdmaIbvWc {}
 impl Default for RDMA {
@@ -40,7 +40,7 @@ impl Default for RDMA {
             id: null_mut(),
             listen_id: null_mut(),
             is_server: false,
-            init_attr: unsafe { std::mem::zeroed::<ibv_qp_init_attr>() },
+            init_attr: unsafe { Box::new(std::mem::zeroed::<ibv_qp_init_attr>()) },
             send_flags: 0,
         }
     }

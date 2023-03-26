@@ -40,7 +40,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             hint.ai_flags = RAI_PASSIVE.try_into().unwrap();
         }
         hint.ai_port_space = rdma_port_space::RDMA_PS_TCP as i32;
-        
+
         println!("I'm in ");
         let mut info: *mut rdma_addrinfo = null_mut();
         // hint.ai_port_space = rdma_port_space::RDMA_PS_TCP as c_int;
@@ -65,7 +65,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let mut id: *mut rdma_cm_id = null_mut();
         // Safety: ffi
         println!("I'm in ");
-        let mut init_attr = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
+        let mut init_attr = unsafe { Box::new(std::mem::zeroed::<ibv_qp_init_attr>()) };
         // init_attr.cap = cap.into();
         init_attr.cap.max_send_wr = 1;
         init_attr.cap.max_recv_wr = 1;
@@ -77,17 +77,20 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             init_attr.qp_context = id.cast();
         }
         init_attr.sq_sig_all = 1;
-        ret = unsafe { rdma_create_ep(&mut id, info, null_mut(), &mut init_attr) };
+        ret = unsafe { rdma_create_ep(&mut id, info, null_mut(), &mut *init_attr) };
         println!("I'm in {}", ret);
         if ret != 0 {
             // Safety: ffi
             unsafe {
                 rdma_freeaddrinfo(info);
             }
+            println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         println!("I'm in ");
         // Safety: id was initialized by `rdma_create_ep`
+        println!("id:{:?}", id);
+
         let mut rdma = RDMA::default();
         println!("I'm in ");
         if is_server != 0 {
@@ -99,6 +102,8 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
                 unsafe {
                     rdma_destroy_ep(id);
                 }
+
+                println!("{:?}", std::io::Error::last_os_error());
                 return Err(RuntimeError);
             }
             println!("I'm in listen ");
@@ -108,6 +113,8 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
                 unsafe {
                     rdma_destroy_ep(id);
                 }
+
+                println!("{:?}", std::io::Error::last_os_error());
                 return Err(RuntimeError);
             }
             println!("I'm in listen ");
@@ -140,6 +147,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             unsafe {
                 rdma_disconnect(id);
             }
+            println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         Ok(())
@@ -157,6 +165,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let id = rdma.id()?;
         let ret = unsafe { rdma_accept(id, null_mut()) };
         if ret != 0 {
+            println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         Ok(())
@@ -172,18 +181,25 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let id = rdma.id()?;
         //if ibv_wc is NULL,set to 0;
         println!("error is here");
-        let ibv_wc_: *mut ibv_wc = if wc == 0.into() {
-            unsafe { (&mut std::mem::zeroed::<ibv_wc>()) as *mut ibv_wc }
+        let ibv_wc_ = if wc == 0.into() {
+            unsafe { Box::new((&mut std::mem::zeroed::<ibv_wc>()) as *mut ibv_wc) }
         } else {
             self.table
                 .get_mut::<RdmaIbvWc>(wc.into())
                 .map_err(|_| RuntimeError)?
                 .0
+                .clone()
         };
         println!("error is here");
-        let ret = unsafe { rdma_get_send_comp(id, ibv_wc_) };
+        println!("id:{:?}", id);
+
+        let ret = unsafe { rdma_get_send_comp(id, *ibv_wc_) };
+        unsafe{println!("{:?}", (*(*ibv_wc_)).opcode);}
+        unsafe{println!("{:?}", (*(*ibv_wc_)).status);}
+
         println!("error is here ret is {}", ret);
-        if ret != 0 {
+        if ret == -1 {
+            println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         println!("error is here");
@@ -204,16 +220,17 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
         let id = rdma.id()?;
         //if ibv_wc is NULL,set to 0;
-        let ibv_wc_: *mut ibv_wc = if wc == 0.into() {
-            unsafe { null_mut() }
+        let ibv_wc_ = if wc == 0.into() {
+            unsafe { Box::new((&mut std::mem::zeroed::<ibv_wc>()) as *mut ibv_wc) }
         } else {
             self.table
                 .get_mut::<RdmaIbvWc>(wc.into())
                 .map_err(|_| RuntimeError)?
-                .0
+                .0.clone()
         };
-        let ret = unsafe { rdma_get_recv_comp(id, ibv_wc_) };
+        let ret = unsafe { rdma_get_recv_comp(id, *ibv_wc_) };
         if ret != 0 {
+            println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         if wc == 0.into() {
@@ -236,6 +253,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         // TODO: Check Memory
         if addr.is_shared_memory() {
             println!("No Support for Shared Memory!");
+            println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         let mut addr = addr
@@ -250,6 +268,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let mr = unsafe { rdma_reg_msgs(id, addr.as_mut_ptr().cast(), size as usize) };
         if mr.is_null() {
             unsafe { rdma_dereg_mr(mr) };
+            println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         Ok(self
@@ -282,7 +301,12 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             .get_mut::<RDMA>(rdma.into())
             .map_err(|_| RuntimeError)?;
         let id = rdma.id()?;
-        let send_msg = unsafe { addr.mem().base().as_ptr().offset(addr.offset() as isize) };
+        // let send_msg = unsafe { addr.mem().base().as_ptr().offset(addr.offset() as isize) };
+        let mut send_msg = addr
+        .as_array(_size)
+        .as_slice_mut()
+        .map_err(|_| RuntimeError)?
+        .ok_or_else(|| RuntimeError)?;
         let send_mr = self
             .table
             .get_mut::<RdmaMr>(send_mr.into())
@@ -293,7 +317,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             rdma_post_send(
                 id,
                 null_mut(),
-                send_msg as *mut c_void,
+                send_msg.as_mut_ptr().cast(),
                 16,
                 send_mr,
                 flags as i32,
@@ -304,6 +328,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             unsafe {
                 rdma_disconnect(id);
             }
+            println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         Ok(())
@@ -322,18 +347,23 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             .map_err(|_| RuntimeError)?;
         let id = rdma.id()?;
         let send_flags = rdma.send_flags;
-        let recv_msg = unsafe { addr.mem().base().as_ptr().offset(addr.offset() as isize) };
+        let mut recv_msg = addr
+        .as_array(_size)
+        .as_slice_mut()
+        .map_err(|_| RuntimeError)?
+        .ok_or_else(|| RuntimeError)?;
         let mr = self
             .table
             .get_mut::<RdmaMr>(recv_mr.into())
             .map_err(|_| RuntimeError)?
             .0;
-        let ret = unsafe { rdma_post_recv(id, null_mut(), recv_msg as *mut c_void, 16, mr) };
+        let ret = unsafe { rdma_post_recv(id, null_mut(), recv_msg.as_mut_ptr().cast(), 16, mr) };
         if ret != 0 {
             println!("rdma_post_recv");
             if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) as u32 == 0 {
                 unsafe { rdma_dereg_mr(mr) };
             }
+            println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         Ok(())
@@ -352,14 +382,18 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         } else {
             ibv_qp_attr_mask::IBV_QP_CAP.0.try_into().unwrap()
         } as c_int;
-        let ret = unsafe { ibv_query_qp((*id).qp, &mut qp_attr, mask, &mut rdma.init_attr) };
+
+        let ret = unsafe { ibv_query_qp((*id).qp, &mut qp_attr, mask, &mut *rdma.init_attr) };
         if ret != 0 {
             println!("ibv_query_qp error");
             unsafe {
                 rdma_destroy_ep(id);
             }
+            println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
+        // println!("{:?}", qp_attr.);
+        println!("{:?}", rdma.init_attr.qp_type);
         if rdma.init_attr.cap.max_inline_data >= 16 {
             rdma.send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
         } else {
