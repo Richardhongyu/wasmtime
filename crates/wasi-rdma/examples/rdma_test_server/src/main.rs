@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 use wasi_rdma;
-static SERVER: &str = "192.168.217.128\0";
+static SERVER: &str = "192.168.31.210\0";
 static PORT: &str = "7471\0";
 
 fn main() {
@@ -187,11 +187,12 @@ fn server_run() -> i32 {
     //     return ret;
     // }
 
-    let wc = unsafe { wasi_rdma::rdma_get_send_comp(rdma, 0).unwrap() };
+    // let wc = unsafe { wasi_rdma::rdma_get_send_comp(rdma, 0).unwrap() };
     let mut ret = 0;
-    while ret == 0 {
-        ret = unsafe { wasi_rdma::rdma_get_recv_comp(rdma, wc).unwrap() };
-    }
+    // while ret == 0 {
+       let wc= unsafe { wasi_rdma::rdma_get_recv_comp(rdma, 0).unwrap() };
+    // }
+    println!("rdma_server: recv ret : {:?}", wc);
     println!("rdma_client: recv msg : {:?}", recv_msg);
     // TODO: fix the error handle
     // if ret < 0 {
@@ -205,9 +206,9 @@ fn server_run() -> i32 {
     };
 
     let mut ret = 0;
-    while ret == 0 {
+    
         ret = unsafe { wasi_rdma::rdma_get_send_comp(rdma, wc).unwrap() };
-    }
+    
     // TODO: fix the error handle
     // if ret < 0 {
     //     println!("rdma_get_send_comp");
@@ -217,5 +218,5 @@ fn server_run() -> i32 {
     //     return ret;
     // }
 
-    ret as i32
+    0
 }

@@ -193,14 +193,23 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         println!("error is here");
         println!("id:{:?}", id);
 
-        let ret = unsafe { rdma_get_send_comp(id, *ibv_wc_) };
+        let mut ret = unsafe { rdma_get_send_comp(id, *ibv_wc_) };
         unsafe{println!("{:?}", (*(*ibv_wc_)).opcode);}
         unsafe{println!("{:?}", (*(*ibv_wc_)).status);}
 
         println!("error is here ret is {}", ret);
-        if ret == -1 {
+        if ret <0 {
             println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
+        }else if ret ==0 {
+            while ret == 0 {
+                ret = unsafe { rdma_get_send_comp(id, *ibv_wc_) };
+            }
+            println!("rdma_get_send_comp is {}", ret);
+            if ret <0 {
+                println!("{:?}", std::io::Error::last_os_error());
+                return Err(RuntimeError);
+            }
         }
         println!("error is here");
         if wc == 0.into() {
@@ -228,10 +237,19 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
                 .map_err(|_| RuntimeError)?
                 .0.clone()
         };
-        let ret = unsafe { rdma_get_recv_comp(id, *ibv_wc_) };
-        if ret != 0 {
+        let mut ret = unsafe { rdma_get_recv_comp(id, *ibv_wc_) };
+        if ret <0 {
             println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
+        }else if ret ==0 {
+            while ret == 0 {
+                ret = unsafe { rdma_get_recv_comp(id, *ibv_wc_) };
+            }
+            println!("rdma_get_recv_comp is {}", ret);
+            if ret <0 {
+                println!("{:?}", std::io::Error::last_os_error());
+                return Err(RuntimeError);
+            }
         }
         if wc == 0.into() {
             Ok(self

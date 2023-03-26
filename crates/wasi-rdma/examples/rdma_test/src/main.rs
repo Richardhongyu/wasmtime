@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 use wasi_rdma;
-static SERVER: &str = "192.168.217.128\0";
+static SERVER: &str = "192.168.31.210\0";
 static PORT: &str = "7471\0";
 
 fn main() {
@@ -78,7 +78,7 @@ fn client_run() -> i32 {
         max_inline_data: 16,
     };
 
-    send_flags = 8;
+    send_flags = 8_u32;
     // TODO: add the send_flags support
     // if cap.max_inline_data >= 16 {
     //     send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
@@ -112,9 +112,10 @@ fn client_run() -> i32 {
     let wc = unsafe { wasi_rdma::rdma_get_send_comp(rdma, 0).unwrap() };
     let mut ret = 0;
     println!("client end");
-    while ret == 0 {
-        ret = unsafe { wasi_rdma::rdma_get_send_comp(rdma, wc).unwrap() };
-    }
+    // while ret == 0 {
+    //     ret = unsafe { wasi_rdma::rdma_get_send_comp(rdma, wc).unwrap() };
+    //     println!("client ret: {}", ret);
+    // }
     println!("client");
     // TODO: fix the error handle
     // if ret < 0 {
@@ -126,9 +127,9 @@ fn client_run() -> i32 {
     // }
 
     ret = 0;
-    while ret == 0 {
+    // while ret == 0 {
         ret = unsafe { wasi_rdma::rdma_get_recv_comp(rdma, wc).unwrap() };
-    }
+    // }
     println!("rdma_client: recv msg : {:?}", recv_msg);
     // TODO: fix the error handle
     // if ret < 0 {
@@ -137,7 +138,7 @@ fn client_run() -> i32 {
     //     ret = 0;
     // }
 
-    ret as i32
+    0
 }
 
 fn server_run() -> i32 {
@@ -212,9 +213,9 @@ fn server_run() -> i32 {
     };
 
     let mut ret = 0;
-    while ret == 0 {
+   
         ret = unsafe { wasi_rdma::rdma_get_send_comp(rdma, wc).unwrap() };
-    }
+    
     // TODO: fix the error handle
     // if ret < 0 {
     //     println!("rdma_get_send_comp");
@@ -224,5 +225,5 @@ fn server_run() -> i32 {
     //     return ret;
     // }
 
-    ret as i32
+    0
 }
