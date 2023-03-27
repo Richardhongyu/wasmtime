@@ -48,10 +48,10 @@ pub type IbvSendFlag = u32;
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct RdmaAddrinfoStruct {
-    pub flags: i32,
-    pub port_space: i32,
-    pub family: i32,
-    pub qp_type: i32,
+    pub flags: u32,
+    pub port_space: u32,
+    pub family: u32,
+    pub qp_type: u32,
     pub src_len: u32,
     pub dst_len: u32,
 }

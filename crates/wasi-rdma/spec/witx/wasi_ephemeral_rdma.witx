@@ -13,10 +13,10 @@
 ;;;(typename $conn_param (handle))
 (typename $rdma_addrinfo_struct
   (record
-    (field $flags s32)
-    (field $port_space s32)
-    (field $family s32)
-    (field $qp_type s32)
+    (field $flags u32)
+    (field $port_space u32)
+    (field $family u32)
+    (field $qp_type u32)
     (field $src_len u32)
     (field $dst_len u32)
   )

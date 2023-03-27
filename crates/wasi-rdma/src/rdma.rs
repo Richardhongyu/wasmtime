@@ -50,22 +50,22 @@ impl From<&RdmaAddrinfoStruct> for rdma_addrinfo {
     fn from(s: &RdmaAddrinfoStruct) -> rdma_addrinfo {
         let mut addrinfo: rdma_addrinfo = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
         if s.flags > 0 {
-            addrinfo.ai_flags = s.flags;
+            addrinfo.ai_flags = s.flags as i32;
         } else {
             println!("error flag ai_flags {}", s.flags);
         }
         if s.family > 0 {
-            addrinfo.ai_family = s.family;
+            addrinfo.ai_family = s.family as i32;
         } else {
             println!("error flag ai_family {}", s.family);
         }
         if s.qp_type > 0 {
-            addrinfo.ai_qp_type = s.qp_type;
+            addrinfo.ai_qp_type = s.qp_type as i32;
         } else {
             println!("error flag ai_qp_type {}", s.qp_type);
         }
         if s.port_space > 0 {
-            addrinfo.ai_port_space = s.port_space;
+            addrinfo.ai_port_space = s.port_space as i32;
         } else {
             println!("error flag ai_port_space {}", s.port_space);
         }

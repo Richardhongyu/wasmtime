@@ -35,7 +35,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
     ) -> Result<Rdma, RdmaError> {
         println!("I'm in ");
         let mut hint: rdma_addrinfo = hints.into();
-        let mut hint = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
+        // let mut hint = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
         if is_server == 1 {
             hint.ai_flags = RAI_PASSIVE.try_into().unwrap();
         }
@@ -66,18 +66,19 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         // Safety: ffi
         println!("I'm in ");
         let mut init_attr = unsafe { Box::new(std::mem::zeroed::<ibv_qp_init_attr>()) };
-        // init_attr.cap = cap.into();
-        init_attr.cap.max_send_wr = 1;
-        init_attr.cap.max_recv_wr = 1;
-        init_attr.cap.max_send_sge = 1;
-        init_attr.cap.max_recv_sge = 1;
-        init_attr.cap.max_inline_data = 16;
+        init_attr.cap = cap.into();
+        // init_attr.cap.max_send_wr = 1;
+        // init_attr.cap.max_recv_wr = 1;
+        // init_attr.cap.max_send_sge = 1;
+        // init_attr.cap.max_recv_sge = 1;
+        // init_attr.cap.max_inline_data = 16;
         //todo: qp_context?
         if is_server == 0 {
             init_attr.qp_context = id.cast();
         }
         init_attr.sq_sig_all = 1;
         ret = unsafe { rdma_create_ep(&mut id, info, null_mut(), &mut *init_attr) };
+
         println!("I'm in {}", ret);
         if ret != 0 {
             // Safety: ffi
@@ -90,7 +91,6 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         println!("I'm in ");
         // Safety: id was initialized by `rdma_create_ep`
         println!("id:{:?}", id);
-
         let mut rdma = RDMA::default();
         println!("I'm in ");
         if is_server != 0 {
@@ -120,6 +120,11 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             println!("I'm in listen ");
             rdma.id = _listen_id;
         } else {
+                if init_attr.cap.max_inline_data >= 16 {
+                    rdma.send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
+                } else {
+                    println!("rdma_client: device doesn't support IBV_SEND_INLINE, using sge sends");
+                }    
             rdma.id = id;
         }
         println!("I'm in listen ");
@@ -318,6 +323,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             .table
             .get_mut::<RDMA>(rdma.into())
             .map_err(|_| RuntimeError)?;
+        rdma.send_flags=flags;
         let id = rdma.id()?;
         // let send_msg = unsafe { addr.mem().base().as_ptr().offset(addr.offset() as isize) };
         let mut send_msg = addr
@@ -325,11 +331,14 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         .as_slice_mut()
         .map_err(|_| RuntimeError)?
         .ok_or_else(|| RuntimeError)?;
-        let send_mr = self
+        let send_mr = if Into::<u32>::into(send_mr)>0{ self
             .table
             .get_mut::<RdmaMr>(send_mr.into())
             .map_err(|_| RuntimeError)?
-            .0;
+            .0
+        }else{
+            null_mut()
+        };
 
         let ret = unsafe {
             rdma_post_send(
