@@ -15,7 +15,7 @@ pub trait RustGenerator<'a> {
 
     fn push_str(&mut self, s: &str);
     fn info(&self, ty: TypeId) -> TypeInfo;
-    fn current_interface(&self) -> Option<InterfaceId>;
+    fn path_to_interface(&self, interface: InterfaceId) -> Option<String>;
 
     fn print_ty(&mut self, ty: &Type, mode: TypeMode) {
         match ty {
@@ -64,19 +64,9 @@ pub trait RustGenerator<'a> {
                 self.result_name(id)
             };
             if let TypeOwner::Interface(id) = ty.owner {
-                if let Some(name) = &self.resolve().interfaces[id].name {
-                    match self.current_interface() {
-                        Some(cur) if cur == id => {}
-                        Some(_other) => {
-                            self.push_str("super::");
-                            self.push_str(&name.to_snake_case());
-                            self.push_str("::");
-                        }
-                        None => {
-                            self.push_str(&name.to_snake_case());
-                            self.push_str("::");
-                        }
-                    }
+                if let Some(path) = self.path_to_interface(id) {
+                    self.push_str(&path);
+                    self.push_str("::");
                 }
             }
             self.push_str(&name);
@@ -368,6 +358,7 @@ pub trait RustGenerator<'a> {
     }
 }
 
+/// Translate `name` to a Rust `snake_case` identifier.
 pub fn to_rust_ident(name: &str) -> String {
     match name {
         // Escape Rust keywords.
@@ -423,5 +414,15 @@ pub fn to_rust_ident(name: &str) -> String {
         "yield" => "yield_".into(),
         "try" => "try_".into(),
         s => s.to_snake_case(),
+    }
+}
+
+/// Translate `name` to a Rust `UpperCamelCase` identifier.
+pub fn to_rust_upper_camel_case(name: &str) -> String {
+    match name {
+        // We use `Host` as the name of the trait for host implementations
+        // to fill in, so rename it if "Host" is used as a regular identifier.
+        "host" => "Host_".into(),
+        s => s.to_upper_camel_case(),
     }
 }

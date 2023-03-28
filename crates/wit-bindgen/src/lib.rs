@@ -1,7 +1,7 @@
-use crate::rust::{to_rust_ident, RustGenerator, TypeMode};
+use crate::rust::{to_rust_ident, to_rust_upper_camel_case, RustGenerator, TypeMode};
 use crate::types::{TypeInfo, Types};
 use heck::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::mem;
@@ -32,6 +32,8 @@ struct Wasmtime {
     imports: Vec<Import>,
     exports: Exports,
     types: Types,
+    sizes: SizeAlign,
+    interface_names: HashMap<InterfaceId, String>,
 }
 
 enum Import {
@@ -81,6 +83,7 @@ pub struct TrappableError {
 impl Opts {
     pub fn generate(&self, resolve: &Resolve, world: WorldId) -> String {
         let mut r = Wasmtime::default();
+        r.sizes.fill(resolve);
         r.opts = self.clone();
         r.generate(resolve, world)
     }
@@ -111,6 +114,7 @@ impl Wasmtime {
                 Import::Function { sig, add_to_linker }
             }
             WorldItem::Interface(id) => {
+                gen.gen.interface_names.insert(*id, snake.clone());
                 gen.current_interface = Some(*id);
                 gen.types(*id);
                 gen.generate_trappable_error_types(TypeOwner::Interface(*id));
@@ -157,12 +161,13 @@ impl Wasmtime {
             }
             WorldItem::Type(_) => unreachable!(),
             WorldItem::Interface(id) => {
+                gen.gen.interface_names.insert(*id, snake.clone());
                 gen.current_interface = Some(*id);
                 gen.types(*id);
                 gen.generate_trappable_error_types(TypeOwner::Interface(*id));
                 let iface = &resolve.interfaces[*id];
 
-                let camel = name.to_upper_camel_case();
+                let camel = to_rust_upper_camel_case(name);
                 uwriteln!(gen.src, "pub struct {camel} {{");
                 for (_, func) in iface.functions.iter() {
                     uwriteln!(
@@ -179,7 +184,7 @@ impl Wasmtime {
                     "
                         pub fn new(
                             __exports: &mut wasmtime::component::ExportInstance<'_, '_>,
-                        ) -> anyhow::Result<{camel}> {{
+                        ) -> wasmtime::Result<{camel}> {{
                     "
                 );
                 let mut fields = Vec::new();
@@ -237,7 +242,7 @@ impl Wasmtime {
     }
 
     fn finish(&mut self, resolve: &Resolve, world: WorldId) -> String {
-        let camel = resolve.worlds[world].name.to_upper_camel_case();
+        let camel = to_rust_upper_camel_case(&resolve.worlds[world].name);
         uwriteln!(self.src, "pub struct {camel} {{");
         for (name, (ty, _)) in self.exports.fields.iter() {
             uwriteln!(self.src, "{name}: {ty},");
@@ -267,7 +272,7 @@ impl Wasmtime {
                     mut store: impl wasmtime::AsContextMut<Data = T>,
                     component: &wasmtime::component::Component,
                     linker: &wasmtime::component::Linker<T>,
-                ) -> anyhow::Result<(Self, wasmtime::component::Instance)> {{
+                ) -> wasmtime::Result<(Self, wasmtime::component::Instance)> {{
                     let instance = linker.instantiate{async__}(&mut store, component){await_}?;
                     Ok((Self::new(store, &instance)?, instance))
                 }}
@@ -278,7 +283,7 @@ impl Wasmtime {
                 pub {async_} fn instantiate_pre<T {send}>(
                     mut store: impl wasmtime::AsContextMut<Data = T>,
                     instance_pre: &wasmtime::component::InstancePre<T>,
-                ) -> anyhow::Result<(Self, wasmtime::component::Instance)> {{
+                ) -> wasmtime::Result<(Self, wasmtime::component::Instance)> {{
                     let instance = instance_pre.instantiate{async__}(&mut store){await_}?;
                     Ok((Self::new(store, &instance)?, instance))
                 }}
@@ -294,7 +299,7 @@ impl Wasmtime {
                 pub fn new(
                     mut store: impl wasmtime::AsContextMut,
                     instance: &wasmtime::component::Instance,
-                ) -> anyhow::Result<Self> {{
+                ) -> wasmtime::Result<Self> {{
                     let mut store = store.as_context_mut();
                     let mut exports = instance.exports(&mut store);
                     let mut __exports = exports.root();
@@ -363,7 +368,7 @@ impl Wasmtime {
             return;
         }
 
-        let world_camel = resolve.worlds[world].name.to_upper_camel_case();
+        let world_camel = to_rust_upper_camel_case(&resolve.worlds[world].name);
         if self.opts.async_ {
             uwriteln!(self.src, "#[wasmtime::component::__internal::async_trait]")
         }
@@ -397,15 +402,15 @@ impl Wasmtime {
                 pub fn add_to_linker<T, U>(
                     linker: &mut wasmtime::component::Linker<T>,
                     get: impl Fn(&mut T) -> &mut U + Send + Sync + Copy + 'static,
-                ) -> anyhow::Result<()>
+                ) -> wasmtime::Result<()>
                     where U: \
             "
         );
-        let world_camel = resolve.worlds[world].name.to_upper_camel_case();
+        let world_camel = to_rust_upper_camel_case(&resolve.worlds[world].name);
         let world_trait = format!("{world_camel}Imports");
         for (i, name) in interfaces
             .iter()
-            .map(|n| format!("{n}::{}", n.to_upper_camel_case()))
+            .map(|n| format!("{n}::Host"))
             .chain(if functions.is_empty() {
                 None
             } else {
@@ -442,7 +447,7 @@ impl Wasmtime {
                 pub fn add_root_to_linker<T, U>(
                     linker: &mut wasmtime::component::Linker<T>,
                     get: impl Fn(&mut T) -> &mut U + Send + Sync + Copy + 'static,
-                ) -> anyhow::Result<()>
+                ) -> wasmtime::Result<()>
                     where U: {world_trait}{maybe_send}
                 {{
                     let mut linker = linker.root();
@@ -568,6 +573,7 @@ impl<'a> InterfaceGenerator<'a> {
                 self.push_str(&name);
                 self.push_str("{}\n");
             }
+            self.assert_type(id, &name);
         }
     }
 
@@ -584,14 +590,15 @@ impl<'a> InterfaceGenerator<'a> {
                 self.push_str(",");
             }
             self.push_str(");\n");
+            self.assert_type(id, &name);
         }
     }
 
-    fn type_flags(&mut self, _id: TypeId, name: &str, flags: &Flags, docs: &Docs) {
+    fn type_flags(&mut self, id: TypeId, name: &str, flags: &Flags, docs: &Docs) {
         self.rustdoc(docs);
+        let rust_name = to_rust_upper_camel_case(name);
         self.src.push_str("wasmtime::component::flags!(\n");
-        self.src
-            .push_str(&format!("{} {{\n", name.to_upper_camel_case()));
+        self.src.push_str(&format!("{rust_name} {{\n"));
         for flag in flags.flags.iter() {
             // TODO wasmtime-component-macro doesnt support docs for flags rn
             uwrite!(
@@ -603,6 +610,7 @@ impl<'a> InterfaceGenerator<'a> {
         }
         self.src.push_str("}\n");
         self.src.push_str(");\n\n");
+        self.assert_type(id, &rust_name);
     }
 
     fn type_variant(&mut self, id: TypeId, _name: &str, variant: &Variant, docs: &Docs) {
@@ -642,7 +650,25 @@ impl<'a> InterfaceGenerator<'a> {
             self.push_str("= Option<");
             self.print_ty(payload, mode);
             self.push_str(">;\n");
+            self.assert_type(id, &name);
         }
+    }
+
+    // Emit a double-check that the wit-parser-understood size of a type agrees
+    // with the Wasmtime-understood size of a type.
+    fn assert_type(&mut self, id: TypeId, name: &str) {
+        self.push_str("const _: () = {\n");
+        uwriteln!(
+            self.src,
+            "assert!({} == <{name} as wasmtime::component::ComponentType>::SIZE32);",
+            self.gen.sizes.size(&Type::Id(id)),
+        );
+        uwriteln!(
+            self.src,
+            "assert!({} == <{name} as wasmtime::component::ComponentType>::ALIGN32);",
+            self.gen.sizes.align(&Type::Id(id)),
+        );
+        self.push_str("};\n");
     }
 
     fn print_rust_enum<'b>(
@@ -657,7 +683,7 @@ impl<'a> InterfaceGenerator<'a> {
         let info = self.info(id);
 
         for (name, mode) in self.modes_of(id) {
-            let name = name.to_upper_camel_case();
+            let name = to_rust_upper_camel_case(&name);
 
             self.rustdoc(docs);
             let lt = self.lifetime_for(&info, mode);
@@ -722,6 +748,8 @@ impl<'a> InterfaceGenerator<'a> {
                 self.print_generics(lt);
                 self.push_str(" {}\n");
             }
+
+            self.assert_type(id, &name);
         }
     }
 
@@ -777,20 +805,21 @@ impl<'a> InterfaceGenerator<'a> {
             self.push_str(",");
             self.print_optional_ty(result.err.as_ref(), mode);
             self.push_str(">;\n");
+            self.assert_type(id, &name);
         }
     }
 
     fn type_enum(&mut self, id: TypeId, name: &str, enum_: &Enum, docs: &Docs) {
         let info = self.info(id);
 
-        let name = name.to_upper_camel_case();
+        let name = to_rust_upper_camel_case(name);
         self.rustdoc(docs);
         self.push_str("#[derive(wasmtime::component::ComponentType)]\n");
         self.push_str("#[derive(wasmtime::component::Lift)]\n");
         self.push_str("#[derive(wasmtime::component::Lower)]\n");
         self.push_str("#[component(enum)]\n");
         self.push_str("#[derive(Clone, Copy, PartialEq, Eq)]\n");
-        self.push_str(&format!("pub enum {} {{\n", name.to_upper_camel_case()));
+        self.push_str(&format!("pub enum {} {{\n", name));
         for case in enum_.cases.iter() {
             self.rustdoc(&case.docs);
             self.push_str(&format!("#[component(name = \"{}\")]", case.name));
@@ -874,6 +903,7 @@ impl<'a> InterfaceGenerator<'a> {
                     .map(|c| (c.name.to_upper_camel_case(), None)),
             )
         }
+        self.assert_type(id, &name);
     }
 
     fn type_alias(&mut self, id: TypeId, _name: &str, ty: &Type, docs: &Docs) {
@@ -886,6 +916,7 @@ impl<'a> InterfaceGenerator<'a> {
             self.push_str(" = ");
             self.print_ty(ty, mode);
             self.push_str(";\n");
+            self.assert_type(id, &name);
         }
     }
 
@@ -899,6 +930,7 @@ impl<'a> InterfaceGenerator<'a> {
             self.push_str(" = ");
             self.print_list(ty, mode);
             self.push_str(";\n");
+            self.assert_type(id, &name);
         }
     }
 
@@ -953,7 +985,6 @@ impl<'a> InterfaceGenerator<'a> {
 
     fn generate_add_to_linker(&mut self, id: InterfaceId, name: &str) {
         let iface = &self.resolve.interfaces[id];
-        let camel = name.to_upper_camel_case();
         let owner = TypeOwner::Interface(id);
 
         if self.gen.opts.async_ {
@@ -961,16 +992,16 @@ impl<'a> InterfaceGenerator<'a> {
         }
         // Generate the `pub trait` which represents the host functionality for
         // this import.
-        uwriteln!(self.src, "pub trait {camel}: Sized {{");
+        uwriteln!(self.src, "pub trait Host: Sized {{");
         for (_, func) in iface.functions.iter() {
             self.generate_function_trait_sig(owner, func);
         }
         uwriteln!(self.src, "}}");
 
         let where_clause = if self.gen.opts.async_ {
-            format!("T: Send, U: {camel} + Send")
+            format!("T: Send, U: Host + Send")
         } else {
-            format!("U: {camel}")
+            format!("U: Host")
         };
         uwriteln!(
             self.src,
@@ -978,7 +1009,7 @@ impl<'a> InterfaceGenerator<'a> {
                 pub fn add_to_linker<T, U>(
                     linker: &mut wasmtime::component::Linker<T>,
                     get: impl Fn(&mut T) -> &mut U + Send + Sync + Copy + 'static,
-                ) -> anyhow::Result<()>
+                ) -> wasmtime::Result<()>
                     where {where_clause},
                 {{
             "
@@ -1124,9 +1155,9 @@ impl<'a> InterfaceGenerator<'a> {
             self.push_str(&error_typename);
             self.push_str(">");
         } else {
-            // All other functions get their return values wrapped in an anyhow::Result.
+            // All other functions get their return values wrapped in an wasmtime::Result.
             // Returning the anyhow::Error case can be used to trap.
-            self.push_str("anyhow::Result<");
+            self.push_str("wasmtime::Result<");
             self.print_result_ty(&func.results, TypeMode::Owned);
             self.push_str(">");
         }
@@ -1174,7 +1205,7 @@ impl<'a> InterfaceGenerator<'a> {
             self.print_ty(&param.1, TypeMode::AllBorrowed("'_"));
             self.push_str(",");
         }
-        self.src.push_str(") -> anyhow::Result<");
+        self.src.push_str(") -> wasmtime::Result<");
         self.print_result_ty(&func.results, TypeMode::Owned);
 
         if self.gen.opts.async_ {
@@ -1354,8 +1385,18 @@ impl<'a> RustGenerator<'a> for InterfaceGenerator<'a> {
         self.resolve
     }
 
-    fn current_interface(&self) -> Option<InterfaceId> {
-        self.current_interface
+    fn path_to_interface(&self, interface: InterfaceId) -> Option<String> {
+        match self.current_interface {
+            Some(id) if id == interface => None,
+            _ => {
+                let name = &self.gen.interface_names[&interface];
+                Some(if self.current_interface.is_some() {
+                    format!("super::{name}")
+                } else {
+                    name.clone()
+                })
+            }
+        }
     }
 
     fn push_str(&mut self, s: &str) {

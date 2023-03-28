@@ -2,13 +2,13 @@
 //! [InstructionContext]; the interpretation is generic over [Value]s.
 use crate::address::{Address, AddressSize};
 use crate::instruction::InstructionContext;
-use crate::state::{MemoryError, State};
+use crate::state::{InterpreterFunctionRef, MemoryError, State};
 use crate::value::{Value, ValueConversionKind, ValueError, ValueResult};
 use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
-    types, AbiParam, Block, BlockCall, ExternalName, FuncRef, Function, InstructionData, Opcode,
-    TrapCode, Type, Value as ValueRef,
+    types, AbiParam, AtomicRmwOp, Block, BlockCall, ExternalName, FuncRef, Function,
+    InstructionData, MemFlags, Opcode, TrapCode, Type, Value as ValueRef,
 };
 use log::trace;
 use smallvec::{smallvec, SmallVec};
@@ -173,6 +173,8 @@ where
         MemoryError::InvalidEntry { .. } => TrapCode::HeapOutOfBounds,
         MemoryError::OutOfBoundsStore { .. } => TrapCode::HeapOutOfBounds,
         MemoryError::OutOfBoundsLoad { .. } => TrapCode::HeapOutOfBounds,
+        MemoryError::MisalignedLoad { .. } => TrapCode::HeapMisaligned,
+        MemoryError::MisalignedStore { .. } => TrapCode::HeapMisaligned,
     };
 
     // Assigns or traps depending on the value of the result
@@ -197,45 +199,51 @@ where
         Ok(sum(imm, args)? as u64)
     };
 
+    // Interpret a unary instruction with the given `op`, assigning the resulting value to the
+    // instruction's results.
+    let unary = |op: fn(V) -> ValueResult<V>, arg: V| -> ValueResult<ControlFlow<V>> {
+        let ctrl_ty = inst_context.controlling_type().unwrap();
+        let res = unary_arith(arg, ctrl_ty, op, false)?;
+        Ok(assign(res))
+    };
+
     // Interpret a binary instruction with the given `op`, assigning the resulting value to the
     // instruction's results.
-    let binary = |op: fn(V, V) -> ValueResult<V>,
-                  left: V,
-                  right: V|
-     -> ValueResult<ControlFlow<V>> { Ok(assign(op(left, right)?)) };
+    let binary =
+        |op: fn(V, V) -> ValueResult<V>, left: V, right: V| -> ValueResult<ControlFlow<V>> {
+            let ctrl_ty = inst_context.controlling_type().unwrap();
+            let res = binary_arith(left, right, ctrl_ty, op, false)?;
+            Ok(assign(res))
+        };
 
     // Same as `binary_unsigned`, but converts the values to their unsigned form before the
     // operation and back to signed form afterwards. Since Cranelift types have no notion of
     // signedness, this enables operations that depend on sign.
     let binary_unsigned =
         |op: fn(V, V) -> ValueResult<V>, left: V, right: V| -> ValueResult<ControlFlow<V>> {
-            Ok(assign(
-                op(
-                    left.convert(ValueConversionKind::ToUnsigned)?,
-                    right.convert(ValueConversionKind::ToUnsigned)?,
-                )
-                .and_then(|v| v.convert(ValueConversionKind::ToSigned))?,
-            ))
+            let ctrl_ty = inst_context.controlling_type().unwrap();
+            let res = binary_arith(left, right, ctrl_ty, op, true)
+                .and_then(|v| v.convert(ValueConversionKind::ToSigned))?;
+            Ok(assign(res))
         };
 
     // Similar to `binary` but converts select `ValueError`'s into trap `ControlFlow`'s
-    let binary_can_trap = |op: fn(V, V) -> ValueResult<V>,
-                           left: V,
-                           right: V|
-     -> ValueResult<ControlFlow<V>> { assign_or_trap(op(left, right)) };
+    let binary_can_trap =
+        |op: fn(V, V) -> ValueResult<V>, left: V, right: V| -> ValueResult<ControlFlow<V>> {
+            let ctrl_ty = inst_context.controlling_type().unwrap();
+            let res = binary_arith(left, right, ctrl_ty, op, false);
+            assign_or_trap(res)
+        };
 
     // Same as `binary_can_trap`, but converts the values to their unsigned form before the
     // operation and back to signed form afterwards. Since Cranelift types have no notion of
     // signedness, this enables operations that depend on sign.
     let binary_unsigned_can_trap =
         |op: fn(V, V) -> ValueResult<V>, left: V, right: V| -> ValueResult<ControlFlow<V>> {
-            assign_or_trap(
-                op(
-                    left.convert(ValueConversionKind::ToUnsigned)?,
-                    right.convert(ValueConversionKind::ToUnsigned)?,
-                )
-                .and_then(|v| v.convert(ValueConversionKind::ToSigned)),
-            )
+            let ctrl_ty = inst_context.controlling_type().unwrap();
+            let res = binary_arith(left, right, ctrl_ty, op, true)
+                .and_then(|v| v.convert(ValueConversionKind::ToSigned));
+            assign_or_trap(res)
         };
 
     // Choose whether to assign `left` or `right` to the instruction's result based on a `condition`.
@@ -276,35 +284,12 @@ where
         }
     };
 
-    // Perform a call operation.
-    //
-    // The returned `ControlFlow` variant is determined by the given function
-    // argument, which should make either a `ControlFlow::Call` or a
-    // `ControlFlow::ReturnCall`.
-    let do_call = |make_ctrl_flow: fn(&'a Function, SmallVec<[V; 1]>) -> ControlFlow<'a, V>|
+    // Calls a function reference with the given arguments.
+    let call_func = |func_ref: InterpreterFunctionRef<'a>,
+                     args: SmallVec<[V; 1]>,
+                     make_ctrl_flow: fn(&'a Function, SmallVec<[V; 1]>) -> ControlFlow<'a, V>|
      -> Result<ControlFlow<'a, V>, StepError> {
-        let func_ref = if let InstructionData::Call { func_ref, .. } = inst {
-            func_ref
-        } else {
-            unreachable!()
-        };
-
-        let curr_func = state.get_current_function();
-        let ext_data = curr_func
-            .dfg
-            .ext_funcs
-            .get(func_ref)
-            .ok_or(StepError::UnknownFunction(func_ref))?;
-
-        let signature = if let Some(sig) = curr_func.dfg.signatures.get(ext_data.signature) {
-            sig
-        } else {
-            return Ok(ControlFlow::Trap(CraneliftTrap::User(
-                TrapCode::BadSignature,
-            )));
-        };
-
-        let args = args()?;
+        let signature = func_ref.signature();
 
         // Check the types of the arguments. This is usually done by the verifier, but nothing
         // guarantees that the user has ran that.
@@ -315,17 +300,16 @@ where
             )));
         }
 
-        Ok(match ext_data.name {
-            // These functions should be registered in the regular function store
-            ExternalName::User(_) | ExternalName::TestCase(_) => {
-                let function = state
-                    .get_function(func_ref)
-                    .ok_or(StepError::UnknownFunction(func_ref))?;
-
-                make_ctrl_flow(function, args)
-            }
-            ExternalName::LibCall(libcall) => {
-                debug_assert_ne!(inst.opcode(), Opcode::ReturnCall, "Cannot tail call to libcalls");
+        Ok(match func_ref {
+            InterpreterFunctionRef::Function(func) => make_ctrl_flow(func, args),
+            InterpreterFunctionRef::LibCall(libcall) => {
+                debug_assert!(
+                    !matches!(
+                        inst.opcode(),
+                        Opcode::ReturnCall | Opcode::ReturnCallIndirect,
+                    ),
+                    "Cannot tail call to libcalls"
+                );
                 let libcall_handler = state.get_libcall_handler();
 
                 // We don't transfer control to a libcall, we just execute it and return the results
@@ -342,7 +326,6 @@ where
                     ControlFlow::Trap(CraneliftTrap::User(TrapCode::BadSignature))
                 }
             }
-            ExternalName::KnownSymbol(_) => unimplemented!(),
         })
     };
 
@@ -398,11 +381,83 @@ where
         Opcode::Trapnz => trap_when(arg(0)?.into_bool()?, CraneliftTrap::User(trap_code())),
         Opcode::ResumableTrapnz => trap_when(arg(0)?.into_bool()?, CraneliftTrap::Resumable),
         Opcode::Return => ControlFlow::Return(args()?),
-        Opcode::Call => do_call(ControlFlow::Call)?,
-        Opcode::CallIndirect => unimplemented!("CallIndirect"),
-        Opcode::ReturnCall => do_call(ControlFlow::ReturnCall)?,
-        Opcode::ReturnCallIndirect => unimplemented!("ReturnCallIndirect"),
-        Opcode::FuncAddr => unimplemented!("FuncAddr"),
+        Opcode::Call | Opcode::ReturnCall => {
+            let func_ref = if let InstructionData::Call { func_ref, .. } = inst {
+                func_ref
+            } else {
+                unreachable!()
+            };
+
+            let curr_func = state.get_current_function();
+            let ext_data = curr_func
+                .dfg
+                .ext_funcs
+                .get(func_ref)
+                .ok_or(StepError::UnknownFunction(func_ref))?;
+
+            let args = args()?;
+            let func = match ext_data.name {
+                // These functions should be registered in the regular function store
+                ExternalName::User(_) | ExternalName::TestCase(_) => {
+                    let function = state
+                        .get_function(func_ref)
+                        .ok_or(StepError::UnknownFunction(func_ref))?;
+                    InterpreterFunctionRef::Function(function)
+                }
+                ExternalName::LibCall(libcall) => InterpreterFunctionRef::LibCall(libcall),
+                ExternalName::KnownSymbol(_) => unimplemented!(),
+            };
+
+            let make_control_flow = match inst.opcode() {
+                Opcode::Call => ControlFlow::Call,
+                Opcode::ReturnCall => ControlFlow::ReturnCall,
+                _ => unreachable!(),
+            };
+
+            call_func(func, args, make_control_flow)?
+        }
+        Opcode::CallIndirect | Opcode::ReturnCallIndirect => {
+            let args = args()?;
+            let addr_dv = DataValue::U64(arg(0)?.into_int()? as u64);
+            let addr = Address::try_from(addr_dv.clone()).map_err(StepError::MemoryError)?;
+
+            let func = state
+                .get_function_from_address(addr)
+                .ok_or_else(|| StepError::MemoryError(MemoryError::InvalidAddress(addr_dv)))?;
+
+            let call_args: SmallVec<[V; 1]> = SmallVec::from(&args[1..]);
+
+            let make_control_flow = match inst.opcode() {
+                Opcode::CallIndirect => ControlFlow::Call,
+                Opcode::ReturnCallIndirect => ControlFlow::ReturnCall,
+                _ => unreachable!(),
+            };
+
+            call_func(func, call_args, make_control_flow)?
+        }
+        Opcode::FuncAddr => {
+            let func_ref = if let InstructionData::FuncAddr { func_ref, .. } = inst {
+                func_ref
+            } else {
+                unreachable!()
+            };
+
+            let ext_data = state
+                .get_current_function()
+                .dfg
+                .ext_funcs
+                .get(func_ref)
+                .ok_or(StepError::UnknownFunction(func_ref))?;
+
+            let addr_ty = inst_context.controlling_type().unwrap();
+            assign_or_memtrap({
+                AddressSize::try_from(addr_ty).and_then(|addr_size| {
+                    let addr = state.function_address(addr_size, &ext_data.name)?;
+                    let dv = DataValue::try_from(addr)?;
+                    Ok(dv.into())
+                })
+            })
+        }
         Opcode::Load
         | Opcode::Uload8
         | Opcode::Sload8
@@ -435,8 +490,10 @@ where
             };
 
             let addr_value = calculate_addr(types::I64, imm(), args()?)?;
+            let mem_flags = inst.memflags().expect("instruction to have memory flags");
             let loaded = assign_or_memtrap(
-                Address::try_from(addr_value).and_then(|addr| state.checked_load(addr, load_ty)),
+                Address::try_from(addr_value)
+                    .and_then(|addr| state.checked_load(addr, load_ty, mem_flags)),
             );
 
             match (loaded, kind) {
@@ -458,33 +515,37 @@ where
             };
 
             let addr_value = calculate_addr(types::I64, imm(), args_range(1..)?)?;
+            let mem_flags = inst.memflags().expect("instruction to have memory flags");
             let reduced = if let Some(c) = kind {
                 arg(0)?.convert(c)?
             } else {
                 arg(0)?
             };
             continue_or_memtrap(
-                Address::try_from(addr_value).and_then(|addr| state.checked_store(addr, reduced)),
+                Address::try_from(addr_value)
+                    .and_then(|addr| state.checked_store(addr, reduced, mem_flags)),
             )
         }
         Opcode::StackLoad => {
             let load_ty = inst_context.controlling_type().unwrap();
             let slot = inst.stack_slot().unwrap();
             let offset = sum(imm(), args()?)? as u64;
+            let mem_flags = MemFlags::new();
             assign_or_memtrap({
                 state
                     .stack_address(AddressSize::_64, slot, offset)
-                    .and_then(|addr| state.checked_load(addr, load_ty))
+                    .and_then(|addr| state.checked_load(addr, load_ty, mem_flags))
             })
         }
         Opcode::StackStore => {
             let arg = arg(0)?;
             let slot = inst.stack_slot().unwrap();
             let offset = sum(imm(), args_range(1..)?)? as u64;
+            let mem_flags = MemFlags::new();
             continue_or_memtrap({
                 state
                     .stack_address(AddressSize::_64, slot, offset)
-                    .and_then(|addr| state.checked_store(addr, arg))
+                    .and_then(|addr| state.checked_store(addr, arg, mem_flags))
             })
         }
         Opcode::StackAddr => {
@@ -548,11 +609,7 @@ where
         Opcode::Select | Opcode::SelectSpectreGuard => {
             choose(arg(0)?.into_bool()?, arg(1)?, arg(2)?)
         }
-        Opcode::Bitselect => {
-            let mask_a = Value::and(arg(0)?, arg(1)?)?;
-            let mask_b = Value::and(Value::not(arg(0)?)?, arg(2)?)?;
-            assign(Value::or(mask_a, mask_b)?)
-        }
+        Opcode::Bitselect => assign(bitselect(arg(0)?, arg(1)?, arg(2)?)?),
         Opcode::Icmp => assign(icmp(
             ctrl_ty,
             inst.cond_code().unwrap(),
@@ -568,7 +625,7 @@ where
         Opcode::Smin => {
             if ctrl_ty.is_vector() {
                 let icmp = icmp(ctrl_ty, IntCC::SignedGreaterThan, &arg(1)?, &arg(0)?)?;
-                assign(vselect(&icmp, &arg(0)?, &arg(1)?, ctrl_ty)?)
+                assign(bitselect(icmp, arg(0)?, arg(1)?)?)
             } else {
                 choose(Value::gt(&arg(1)?, &arg(0)?)?, arg(0)?, arg(1)?)
             }
@@ -576,7 +633,7 @@ where
         Opcode::Umin => {
             if ctrl_ty.is_vector() {
                 let icmp = icmp(ctrl_ty, IntCC::UnsignedGreaterThan, &arg(1)?, &arg(0)?)?;
-                assign(vselect(&icmp, &arg(0)?, &arg(1)?, ctrl_ty)?)
+                assign(bitselect(icmp, arg(0)?, arg(1)?)?)
             } else {
                 choose(
                     Value::gt(
@@ -591,7 +648,7 @@ where
         Opcode::Smax => {
             if ctrl_ty.is_vector() {
                 let icmp = icmp(ctrl_ty, IntCC::SignedGreaterThan, &arg(0)?, &arg(1)?)?;
-                assign(vselect(&icmp, &arg(0)?, &arg(1)?, ctrl_ty)?)
+                assign(bitselect(icmp, arg(0)?, arg(1)?)?)
             } else {
                 choose(Value::gt(&arg(0)?, &arg(1)?)?, arg(0)?, arg(1)?)
             }
@@ -599,7 +656,7 @@ where
         Opcode::Umax => {
             if ctrl_ty.is_vector() {
                 let icmp = icmp(ctrl_ty, IntCC::UnsignedGreaterThan, &arg(0)?, &arg(1)?)?;
-                assign(vselect(&icmp, &arg(0)?, &arg(1)?, ctrl_ty)?)
+                assign(bitselect(icmp, arg(0)?, arg(1)?)?)
             } else {
                 choose(
                     Value::gt(
@@ -760,7 +817,7 @@ where
         Opcode::Band => binary(Value::and, arg(0)?, arg(1)?)?,
         Opcode::Bor => binary(Value::or, arg(0)?, arg(1)?)?,
         Opcode::Bxor => binary(Value::xor, arg(0)?, arg(1)?)?,
-        Opcode::Bnot => assign(Value::not(arg(0)?)?),
+        Opcode::Bnot => unary(Value::not, arg(0)?)?,
         Opcode::BandNot => binary(Value::and, arg(0)?, Value::not(arg(1)?)?)?,
         Opcode::BorNot => binary(Value::or, arg(0)?, Value::not(arg(1)?)?)?,
         Opcode::BxorNot => binary(Value::xor, arg(0)?, Value::not(arg(1)?)?)?,
@@ -777,9 +834,9 @@ where
         Opcode::IshlImm => binary(Value::shl, arg(0)?, imm_as_ctrl_ty()?)?,
         Opcode::UshrImm => binary_unsigned(Value::ushr, arg(0)?, imm_as_ctrl_ty()?)?,
         Opcode::SshrImm => binary(Value::ishr, arg(0)?, imm_as_ctrl_ty()?)?,
-        Opcode::Bitrev => assign(Value::reverse_bits(arg(0)?)?),
-        Opcode::Bswap => assign(Value::swap_bytes(arg(0)?)?),
-        Opcode::Clz => assign(arg(0)?.leading_zeros()?),
+        Opcode::Bitrev => unary(Value::reverse_bits, arg(0)?)?,
+        Opcode::Bswap => unary(Value::swap_bytes, arg(0)?)?,
+        Opcode::Clz => unary(Value::leading_zeros, arg(0)?)?,
         Opcode::Cls => {
             let count = if Value::lt(&arg(0)?, &Value::int(0, ctrl_ty)?)? {
                 arg(0)?.leading_ones()?
@@ -788,7 +845,7 @@ where
             };
             assign(Value::sub(count, Value::int(1, ctrl_ty)?)?)
         }
-        Opcode::Ctz => assign(arg(0)?.trailing_zeros()?),
+        Opcode::Ctz => unary(Value::trailing_zeros, arg(0)?)?,
         Opcode::Popcnt => {
             let count = if arg(0)?.ty().is_int() {
                 arg(0)?.count_ones()?
@@ -814,7 +871,7 @@ where
                         V::bool(
                             fcmp(inst.fp_cond_code().unwrap(), &x, &y).unwrap(),
                             ctrl_ty.is_vector(),
-                            ctrl_ty.lane_type().as_bool(),
+                            ctrl_ty.lane_type().as_truthy(),
                         )
                     })
                     .collect::<ValueResult<SimdVec<V>>>()?),
@@ -825,7 +882,7 @@ where
         Opcode::Fsub => binary(Value::sub, arg(0)?, arg(1)?)?,
         Opcode::Fmul => binary(Value::mul, arg(0)?, arg(1)?)?,
         Opcode::Fdiv => binary(Value::div, arg(0)?, arg(1)?)?,
-        Opcode::Sqrt => assign(Value::sqrt(arg(0)?)?),
+        Opcode::Sqrt => unary(Value::sqrt, arg(0)?)?,
         Opcode::Fma => {
             let arg0 = extractlanes(&arg(0)?, ctrl_ty)?;
             let arg1 = extractlanes(&arg(1)?, ctrl_ty)?;
@@ -841,21 +898,9 @@ where
                 ctrl_ty,
             )?)
         }
-        Opcode::Fneg => assign(Value::neg(arg(0)?)?),
-        Opcode::Fabs => assign(Value::abs(arg(0)?)?),
-        Opcode::Fcopysign => {
-            let arg0 = extractlanes(&arg(0)?, ctrl_ty)?;
-            let arg1 = extractlanes(&arg(1)?, ctrl_ty)?;
-
-            assign(vectorizelanes(
-                &arg0
-                    .into_iter()
-                    .zip(arg1.into_iter())
-                    .map(|(x, y)| V::copysign(x, y))
-                    .collect::<ValueResult<SimdVec<V>>>()?,
-                ctrl_ty,
-            )?)
-        }
+        Opcode::Fneg => unary(Value::neg, arg(0)?)?,
+        Opcode::Fabs => unary(Value::abs, arg(0)?)?,
+        Opcode::Fcopysign => binary(Value::copysign, arg(0)?, arg(1)?)?,
         Opcode::Fmin => assign(match (arg(0)?, arg(1)?) {
             (a, _) if a.is_nan()? => a,
             (_, b) if b.is_nan()? => b,
@@ -880,10 +925,10 @@ where
             (a, b) if a.is_zero()? && b.is_zero()? => a,
             (a, b) => a.max(b)?,
         }),
-        Opcode::Ceil => assign(Value::ceil(arg(0)?)?),
-        Opcode::Floor => assign(Value::floor(arg(0)?)?),
-        Opcode::Trunc => assign(Value::trunc(arg(0)?)?),
-        Opcode::Nearest => assign(Value::nearest(arg(0)?)?),
+        Opcode::Ceil => unary(Value::ceil, arg(0)?)?,
+        Opcode::Floor => unary(Value::floor, arg(0)?)?,
+        Opcode::Trunc => unary(Value::trunc, arg(0)?)?,
+        Opcode::Nearest => unary(Value::nearest, arg(0)?)?,
         Opcode::IsNull => unimplemented!("IsNull"),
         Opcode::IsInvalid => unimplemented!("IsInvalid"),
         Opcode::Bitcast | Opcode::ScalarToVector => {
@@ -934,7 +979,7 @@ where
         }
         Opcode::Bmask => assign({
             let bool = arg(0)?;
-            let bool_ty = ctrl_ty.as_bool_pedantic();
+            let bool_ty = ctrl_ty.as_truthy_pedantic();
             let lanes = extractlanes(&bool, bool_ty)?
                 .into_iter()
                 .map(|lane| lane.convert(ValueConversionKind::Mask(ctrl_ty.lane_type())))
@@ -980,7 +1025,7 @@ where
                     new[i] = x[s[i] as usize];
                 } // else leave as 0
             }
-            assign(Value::vector(new, ctrl_ty)?)
+            assign(Value::vector(new, types::I8X16)?)
         }
         Opcode::Splat => {
             let mut new_vector = SimdVec::new();
@@ -1012,7 +1057,6 @@ where
             }
             assign(Value::int(result, ctrl_ty)?)
         }
-        Opcode::Vselect => assign(vselect(&arg(0)?, &arg(1)?, &arg(2)?, ctrl_ty)?),
         Opcode::VanyTrue => {
             let lane_ty = ctrl_ty.lane_type();
             let init = V::bool(false, true, lane_ty)?;
@@ -1187,48 +1231,86 @@ where
             Value::convert(arg(0)?, ValueConversionKind::ExtractUpper(types::I64))?,
         ]),
         Opcode::Iconcat => assign(Value::concat(arg(0)?, arg(1)?)?),
-        Opcode::AtomicRmw => unimplemented!("AtomicRmw"),
-        Opcode::AtomicCas => unimplemented!("AtomicCas"),
+        Opcode::AtomicRmw => {
+            let op = inst.atomic_rmw_op().unwrap();
+            let val = arg(1)?;
+            let addr = arg(0)?.into_int()? as u64;
+            let mem_flags = inst.memflags().expect("instruction to have memory flags");
+            let loaded = Address::try_from(addr)
+                .and_then(|addr| state.checked_load(addr, ctrl_ty, mem_flags));
+            let prev_val = match loaded {
+                Ok(v) => v,
+                Err(e) => return Ok(ControlFlow::Trap(CraneliftTrap::User(memerror_to_trap(e)))),
+            };
+            let prev_val_to_assign = prev_val.clone();
+            let replace = match op {
+                AtomicRmwOp::Xchg => Ok(val),
+                AtomicRmwOp::Add => Value::add(prev_val, val),
+                AtomicRmwOp::Sub => Value::sub(prev_val, val),
+                AtomicRmwOp::And => Value::and(prev_val, val),
+                AtomicRmwOp::Or => Value::or(prev_val, val),
+                AtomicRmwOp::Xor => Value::xor(prev_val, val),
+                AtomicRmwOp::Nand => Value::and(prev_val, val).and_then(V::not),
+                AtomicRmwOp::Smax => Value::max(prev_val, val),
+                AtomicRmwOp::Smin => Value::min(prev_val, val),
+                AtomicRmwOp::Umax => Value::max(
+                    Value::convert(val, ValueConversionKind::ToUnsigned)?,
+                    Value::convert(prev_val, ValueConversionKind::ToUnsigned)?,
+                )
+                .and_then(|v| Value::convert(v, ValueConversionKind::ToSigned)),
+                AtomicRmwOp::Umin => Value::min(
+                    Value::convert(val, ValueConversionKind::ToUnsigned)?,
+                    Value::convert(prev_val, ValueConversionKind::ToUnsigned)?,
+                )
+                .and_then(|v| Value::convert(v, ValueConversionKind::ToSigned)),
+            }?;
+            let stored = Address::try_from(addr)
+                .and_then(|addr| state.checked_store(addr, replace, mem_flags));
+            assign_or_memtrap(stored.map(|_| prev_val_to_assign))
+        }
+        Opcode::AtomicCas => {
+            let addr = arg(0)?.into_int()? as u64;
+            let mem_flags = inst.memflags().expect("instruction to have memory flags");
+            let loaded = Address::try_from(addr)
+                .and_then(|addr| state.checked_load(addr, ctrl_ty, mem_flags));
+            let loaded_val = match loaded {
+                Ok(v) => v,
+                Err(e) => return Ok(ControlFlow::Trap(CraneliftTrap::User(memerror_to_trap(e)))),
+            };
+            let expected_val = arg(1)?;
+            let val_to_assign = if Value::eq(&loaded_val, &expected_val)? {
+                let val_to_store = arg(2)?;
+                Address::try_from(addr)
+                    .and_then(|addr| state.checked_store(addr, val_to_store, mem_flags))
+                    .map(|_| loaded_val)
+            } else {
+                Ok(loaded_val)
+            };
+            assign_or_memtrap(val_to_assign)
+        }
         Opcode::AtomicLoad => {
             let load_ty = inst_context.controlling_type().unwrap();
             let addr = arg(0)?.into_int()? as u64;
+            let mem_flags = inst.memflags().expect("instruction to have memory flags");
             // We are doing a regular load here, this isn't actually thread safe.
             assign_or_memtrap(
-                Address::try_from(addr).and_then(|addr| state.checked_load(addr, load_ty)),
+                Address::try_from(addr)
+                    .and_then(|addr| state.checked_load(addr, load_ty, mem_flags)),
             )
         }
         Opcode::AtomicStore => {
             let val = arg(0)?;
             let addr = arg(1)?.into_int()? as u64;
+            let mem_flags = inst.memflags().expect("instruction to have memory flags");
             // We are doing a regular store here, this isn't actually thread safe.
             continue_or_memtrap(
-                Address::try_from(addr).and_then(|addr| state.checked_store(addr, val)),
+                Address::try_from(addr).and_then(|addr| state.checked_store(addr, val, mem_flags)),
             )
         }
         Opcode::Fence => {
             // The interpreter always runs in a single threaded context, so we don't
             // actually need to emit a fence here.
             ControlFlow::Continue
-        }
-        Opcode::WideningPairwiseDotProductS => {
-            let ctrl_ty = types::I16X8;
-            let new_type = ctrl_ty.merge_lanes().unwrap();
-            let arg0 = extractlanes(&arg(0)?, ctrl_ty)?;
-            let arg1 = extractlanes(&arg(1)?, ctrl_ty)?;
-            let new_vec = arg0
-                .chunks(2)
-                .into_iter()
-                .zip(arg1.chunks(2))
-                .into_iter()
-                .map(|(x, y)| {
-                    let mut z = 0i128;
-                    for (lhs, rhs) in x.into_iter().zip(y.into_iter()) {
-                        z += lhs.clone().into_int()? * rhs.clone().into_int()?;
-                    }
-                    Value::int(z, new_type.lane_type())
-                })
-                .collect::<ValueResult<Vec<_>>>()?;
-            assign(vectorizelanes(&new_vec, new_type)?)
         }
         Opcode::SqmulRoundSat => {
             let lane_type = ctrl_ty.lane_type();
@@ -1265,6 +1347,11 @@ where
         Opcode::GetFramePointer => unimplemented!("GetFramePointer"),
         Opcode::GetStackPointer => unimplemented!("GetStackPointer"),
         Opcode::GetReturnAddress => unimplemented!("GetReturnAddress"),
+        Opcode::X86Pshufb => unimplemented!("X86Pshufb"),
+        Opcode::X86Blendv => unimplemented!("X86Blendv"),
+        Opcode::X86Pmulhrsw => unimplemented!("X86Pmulhrsw"),
+        Opcode::X86Pmaddubsw => unimplemented!("X86Pmaddubsw"),
+        Opcode::X86Cvtt2dq => unimplemented!("X86Cvtt2dq"),
     })
 }
 
@@ -1374,7 +1461,7 @@ where
         )?)
     };
 
-    let dst_ty = ctrl_ty.as_bool();
+    let dst_ty = ctrl_ty.as_truthy();
     let left = extractlanes(left, ctrl_ty)?;
     let right = extractlanes(right, ctrl_ty)?;
 
@@ -1499,7 +1586,28 @@ where
     extractlanes(&v, ty)?.into_iter().try_fold(init, op)
 }
 
-/// Performs the supplied binary arithmetic `op` on two SIMD vectors.
+/// Performs the supplied unary arithmetic `op` on a Value, either Vector or Scalar.
+fn unary_arith<V, F>(x: V, vector_type: types::Type, op: F, unsigned: bool) -> ValueResult<V>
+where
+    V: Value,
+    F: Fn(V) -> ValueResult<V>,
+{
+    let arg = extractlanes(&x, vector_type)?;
+
+    let result = arg
+        .into_iter()
+        .map(|mut arg| {
+            if unsigned {
+                arg = arg.convert(ValueConversionKind::ToUnsigned)?;
+            }
+            Ok(op(arg)?)
+        })
+        .collect::<ValueResult<SimdVec<V>>>()?;
+
+    vectorizelanes(&result, vector_type)
+}
+
+/// Performs the supplied binary arithmetic `op` on two values, either vector or scalar.
 fn binary_arith<V, F>(x: V, y: V, vector_type: types::Type, op: F, unsigned: bool) -> ValueResult<V>
 where
     V: Value,
@@ -1543,20 +1651,11 @@ where
     vectorizelanes(&result, vector_type)
 }
 
-fn vselect<V>(c: &V, x: &V, y: &V, vector_type: types::Type) -> ValueResult<V>
+fn bitselect<V>(c: V, x: V, y: V) -> ValueResult<V>
 where
     V: Value,
 {
-    let c = extractlanes(c, vector_type)?;
-    let x = extractlanes(x, vector_type)?;
-    let y = extractlanes(y, vector_type)?;
-    let mut new_vec = SimdVec::new();
-    for (c, (x, y)) in c.into_iter().zip(x.into_iter().zip(y.into_iter())) {
-        if Value::eq(&c, &Value::int(0, vector_type.lane_type())?)? {
-            new_vec.push(y);
-        } else {
-            new_vec.push(x);
-        }
-    }
-    vectorizelanes(&new_vec, vector_type)
+    let mask_x = Value::and(c.clone(), x)?;
+    let mask_y = Value::and(Value::not(c)?, y)?;
+    Value::or(mask_x, mask_y)
 }

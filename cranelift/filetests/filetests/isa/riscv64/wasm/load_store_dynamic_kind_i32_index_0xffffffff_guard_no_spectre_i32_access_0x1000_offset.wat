@@ -41,42 +41,38 @@
 
 ;; function u0:0:
 ;; block0:
-;;   uext.w t0,a0
-;;   ld t1,8(a2)
-;;   lui t4,1048575
-;;   addi t4,t4,4092
-;;   add t2,t1,t4
-;;   ugt t1,t0,t2##ty=i64
-;;   bne t1,zero,taken(label1),not_taken(label2)
-;; block2:
-;;   ld t2,0(a2)
-;;   add t2,t2,t0
-;;   lui t1,1
-;;   add a0,t2,t1
-;;   sw a1,0(a0)
-;;   j label3
-;; block3:
-;;   ret
+;;   slli a7,a0,32
+;;   srli t4,a7,32
+;;   ld t3,8(a2)
+;;   ugt t3,t4,t3##ty=i64
+;;   bne t3,zero,taken(label3),not_taken(label1)
 ;; block1:
+;;   ld t0,0(a2)
+;;   add t4,t0,t4
+;;   lui t3,1
+;;   add t0,t4,t3
+;;   sw a1,0(t0)
+;;   j label2
+;; block2:
+;;   ret
+;; block3:
 ;;   udf##trap_code=heap_oob
 ;;
 ;; function u0:1:
 ;; block0:
-;;   uext.w t0,a0
-;;   ld t1,8(a1)
-;;   lui t4,1048575
-;;   addi t4,t4,4092
-;;   add t2,t1,t4
-;;   ugt t1,t0,t2##ty=i64
-;;   bne t1,zero,taken(label1),not_taken(label2)
-;; block2:
-;;   ld t2,0(a1)
-;;   add t2,t2,t0
-;;   lui t1,1
-;;   add a0,t2,t1
-;;   lw a0,0(a0)
-;;   j label3
-;; block3:
-;;   ret
+;;   slli a7,a0,32
+;;   srli t4,a7,32
+;;   ld t3,8(a1)
+;;   ugt t3,t4,t3##ty=i64
+;;   bne t3,zero,taken(label3),not_taken(label1)
 ;; block1:
+;;   ld t0,0(a1)
+;;   add t4,t0,t4
+;;   lui t3,1
+;;   add t0,t4,t3
+;;   lw a0,0(t0)
+;;   j label2
+;; block2:
+;;   ret
+;; block3:
 ;;   udf##trap_code=heap_oob

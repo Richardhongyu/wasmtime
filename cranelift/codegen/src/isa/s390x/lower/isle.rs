@@ -292,15 +292,6 @@ impl generated_code::Context for IsleContext<'_, '_, MInst, S390xBackend> {
     }
 
     #[inline]
-    fn allow_div_traps(&mut self, _: Type) -> Option<()> {
-        if !self.backend.flags.avoid_div_traps() {
-            Some(())
-        } else {
-            None
-        }
-    }
-
-    #[inline]
     fn mie2_enabled(&mut self, _: Type) -> Option<()> {
         if self.backend.isa_flags.has_mie2() {
             Some(())
@@ -436,7 +427,7 @@ impl generated_code::Context for IsleContext<'_, '_, MInst, S390xBackend> {
     }
 
     #[inline]
-    fn u64_as_u32(&mut self, n: u64) -> u32 {
+    fn u64_truncate_to_u32(&mut self, n: u64) -> u32 {
         n as u32
     }
 
@@ -628,21 +619,21 @@ impl generated_code::Context for IsleContext<'_, '_, MInst, S390xBackend> {
     #[inline]
     fn i64_from_negated_value(&mut self, val: Value) -> Option<i64> {
         let constant = self.u64_from_signed_value(val)? as i64;
-        let imm = -constant;
+        let imm = constant.wrapping_neg();
         Some(imm)
     }
 
     #[inline]
     fn i32_from_negated_value(&mut self, val: Value) -> Option<i32> {
         let constant = self.u64_from_signed_value(val)? as i64;
-        let imm = i32::try_from(-constant).ok()?;
+        let imm = i32::try_from(constant.wrapping_neg()).ok()?;
         Some(imm)
     }
 
     #[inline]
     fn i16_from_negated_value(&mut self, val: Value) -> Option<i16> {
         let constant = self.u64_from_signed_value(val)? as i64;
-        let imm = i16::try_from(-constant).ok()?;
+        let imm = i16::try_from(constant.wrapping_neg()).ok()?;
         Some(imm)
     }
 

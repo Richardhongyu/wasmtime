@@ -3,7 +3,11 @@
 use crate::address::{Address, AddressSize};
 use crate::interpreter::LibCallHandler;
 use cranelift_codegen::data_value::DataValue;
-use cranelift_codegen::ir::{FuncRef, Function, GlobalValue, StackSlot, Type, Value};
+use cranelift_codegen::ir::{
+    ExternalName, FuncRef, Function, GlobalValue, LibCall, MemFlags, Signature, StackSlot, Type,
+    Value,
+};
+use cranelift_codegen::isa::CallConv;
 use cranelift_entity::PrimaryMap;
 use smallvec::SmallVec;
 use thiserror::Error;
@@ -59,10 +63,30 @@ pub trait State<'a, V> {
     ) -> Result<Address, MemoryError>;
     /// Retrieve a value `V` from memory at the given `address`, checking if it belongs either to the
     /// stack or to one of the heaps; the number of bytes loaded corresponds to the specified [Type].
-    fn checked_load(&self, address: Address, ty: Type) -> Result<V, MemoryError>;
+    fn checked_load(
+        &self,
+        address: Address,
+        ty: Type,
+        mem_flags: MemFlags,
+    ) -> Result<V, MemoryError>;
     /// Store a value `V` into memory at the given `address`, checking if it belongs either to the
     /// stack or to one of the heaps; the number of bytes stored corresponds to the specified [Type].
-    fn checked_store(&mut self, address: Address, v: V) -> Result<(), MemoryError>;
+    fn checked_store(
+        &mut self,
+        address: Address,
+        v: V,
+        mem_flags: MemFlags,
+    ) -> Result<(), MemoryError>;
+
+    /// Compute the address of a function given its name.
+    fn function_address(
+        &self,
+        size: AddressSize,
+        name: &ExternalName,
+    ) -> Result<Address, MemoryError>;
+
+    /// Retrieve a reference to a [Function] given its address.
+    fn get_function_from_address(&self, address: Address) -> Option<InterpreterFunctionRef<'a>>;
 
     /// Given a global value, compute the final value for that global value, applying all operations
     /// in intermediate global values.
@@ -75,6 +99,33 @@ pub trait State<'a, V> {
     fn get_pinned_reg(&self) -> V;
     /// Sets a value for the pinned reg
     fn set_pinned_reg(&mut self, v: V);
+}
+
+pub enum InterpreterFunctionRef<'a> {
+    Function(&'a Function),
+    LibCall(LibCall),
+}
+
+impl<'a> InterpreterFunctionRef<'a> {
+    pub fn signature(&self) -> Signature {
+        match self {
+            InterpreterFunctionRef::Function(f) => f.stencil.signature.clone(),
+            // CallConv here is sort of irrelevant, since we don't use it for anything
+            InterpreterFunctionRef::LibCall(lc) => lc.signature(CallConv::SystemV),
+        }
+    }
+}
+
+impl<'a> From<&'a Function> for InterpreterFunctionRef<'a> {
+    fn from(f: &'a Function) -> Self {
+        InterpreterFunctionRef::Function(f)
+    }
+}
+
+impl From<LibCall> for InterpreterFunctionRef<'_> {
+    fn from(lc: LibCall) -> Self {
+        InterpreterFunctionRef::LibCall(lc)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -91,6 +142,10 @@ pub enum MemoryError {
     OutOfBoundsLoad { addr: Address, load_size: usize },
     #[error("Store of {store_size} bytes is larger than available size at address {addr:?}")]
     OutOfBoundsStore { addr: Address, store_size: usize },
+    #[error("Load of {load_size} bytes is misaligned at address {addr:?}")]
+    MisalignedLoad { addr: Address, load_size: usize },
+    #[error("Store of {store_size} bytes is misaligned at address {addr:?}")]
+    MisalignedStore { addr: Address, store_size: usize },
 }
 
 /// This dummy state allows interpretation over an immutable mapping of values in a single frame.
@@ -142,11 +197,33 @@ where
         unimplemented!()
     }
 
-    fn checked_load(&self, _addr: Address, _ty: Type) -> Result<V, MemoryError> {
+    fn checked_load(
+        &self,
+        _addr: Address,
+        _ty: Type,
+        _mem_flags: MemFlags,
+    ) -> Result<V, MemoryError> {
         unimplemented!()
     }
 
-    fn checked_store(&mut self, _addr: Address, _v: V) -> Result<(), MemoryError> {
+    fn checked_store(
+        &mut self,
+        _addr: Address,
+        _v: V,
+        _mem_flags: MemFlags,
+    ) -> Result<(), MemoryError> {
+        unimplemented!()
+    }
+
+    fn function_address(
+        &self,
+        _size: AddressSize,
+        _name: &ExternalName,
+    ) -> Result<Address, MemoryError> {
+        unimplemented!()
+    }
+
+    fn get_function_from_address(&self, _address: Address) -> Option<InterpreterFunctionRef<'a>> {
         unimplemented!()
     }
 

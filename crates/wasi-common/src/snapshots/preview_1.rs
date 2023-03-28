@@ -75,8 +75,8 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
 
     async fn clock_res_get(&mut self, id: types::Clockid) -> Result<types::Timestamp, Error> {
         let resolution = match id {
-            types::Clockid::Realtime => Ok(self.clocks.system.resolution()),
-            types::Clockid::Monotonic => Ok(self.clocks.monotonic.resolution()),
+            types::Clockid::Realtime => Ok(self.clocks.system()?.resolution()),
+            types::Clockid::Monotonic => Ok(self.clocks.monotonic()?.abs_clock.resolution()),
             types::Clockid::ProcessCputimeId | types::Clockid::ThreadCputimeId => {
                 Err(Error::badf().context("process and thread clocks are not supported"))
             }
@@ -92,7 +92,7 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
         let precision = Duration::from_nanos(precision);
         match id {
             types::Clockid::Realtime => {
-                let now = self.clocks.system.now(precision).into_std();
+                let now = self.clocks.system()?.now(precision).into_std();
                 let d = now
                     .duration_since(std::time::SystemTime::UNIX_EPOCH)
                     .map_err(|_| {
@@ -101,8 +101,9 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
                 Ok(d.as_nanos().try_into()?)
             }
             types::Clockid::Monotonic => {
-                let now = self.clocks.monotonic.now(precision);
-                let d = now.duration_since(self.clocks.creation_time);
+                let clock = self.clocks.monotonic()?;
+                let now = clock.abs_clock.now(precision);
+                let d = now.duration_since(clock.creation_time);
                 Ok(d.as_nanos().try_into()?)
             }
             types::Clockid::ProcessCputimeId | types::Clockid::ThreadCputimeId => {
@@ -152,12 +153,6 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
         if table.is::<FileEntry>(fd) {
             let _ = table.delete::<FileEntry>(fd);
         } else if table.is::<DirEntry>(fd) {
-            // We cannot close preopened directories
-            let dir_entry: Arc<DirEntry> = table.get(fd).unwrap();
-            if dir_entry.preopen_path().is_some() {
-                return Err(Error::not_supported().context("cannot close propened directory"));
-            }
-            drop(dir_entry);
             let _ = table.delete::<DirEntry>(fd);
         } else {
             return Err(Error::badf().context("key does not refer to file or directory"));
@@ -539,9 +534,6 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
         let to = u32::from(to);
         if !table.contains_key(from) {
             return Err(Error::badf());
-        }
-        if table.is_preopen(from) || table.is_preopen(to) {
-            return Err(Error::not_supported().context("cannot renumber a preopen"));
         }
         table.renumber(from, to)
     }
@@ -925,25 +917,22 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
             match sub.u {
                 types::SubscriptionU::Clock(clocksub) => match clocksub.id {
                     types::Clockid::Monotonic => {
-                        let clock = self.clocks.monotonic.deref();
+                        let clock = self.clocks.monotonic()?;
                         let precision = Duration::from_nanos(clocksub.precision);
                         let duration = Duration::from_nanos(clocksub.timeout);
-                        let deadline = if clocksub
+                        let start = if clocksub
                             .flags
                             .contains(types::Subclockflags::SUBSCRIPTION_CLOCK_ABSTIME)
                         {
-                            self.clocks
-                                .creation_time
-                                .checked_add(duration)
-                                .ok_or_else(|| Error::overflow().context("deadline"))?
+                            clock.creation_time
                         } else {
-                            clock
-                                .now(precision)
-                                .checked_add(duration)
-                                .ok_or_else(|| Error::overflow().context("deadline"))?
+                            clock.abs_clock.now(precision)
                         };
+                        let deadline = start
+                            .checked_add(duration)
+                            .ok_or_else(|| Error::overflow().context("deadline"))?;
                         poll.subscribe_monotonic_clock(
-                            clock,
+                            &*clock.abs_clock,
                             deadline,
                             precision,
                             sub.userdata.into(),
@@ -955,7 +944,7 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
                         // on threads waiting in these functions. MONOTONIC should always have
                         // resolution at least as good as REALTIME, so we can translate a
                         // non-absolute `REALTIME` request into a `MONOTONIC` request.
-                        let clock = self.clocks.monotonic.deref();
+                        let clock = self.clocks.monotonic()?;
                         let precision = Duration::from_nanos(clocksub.precision);
                         let duration = Duration::from_nanos(clocksub.timeout);
                         let deadline = if clocksub
@@ -965,12 +954,13 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
                             return Err(Error::not_supported());
                         } else {
                             clock
+                                .abs_clock
                                 .now(precision)
                                 .checked_add(duration)
                                 .ok_or_else(|| Error::overflow().context("deadline"))?
                         };
                         poll.subscribe_monotonic_clock(
-                            clock,
+                            &*clock.abs_clock,
                             deadline,
                             precision,
                             sub.userdata.into(),

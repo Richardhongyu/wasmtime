@@ -229,7 +229,7 @@ block0(v0: i32x4, v1: i32x4):
 
 function %vselect_i16x8(i16x8, i16x8, i16x8) -> i16x8 {
 block0(v0: i16x8, v1: i16x8, v2: i16x8):
-    v3 = vselect v0, v1, v2
+    v3 = bitselect v0, v1, v2
     return v3
 }
 
@@ -237,9 +237,10 @@ block0(v0: i16x8, v1: i16x8, v2: i16x8):
 ;   pushq   %rbp
 ;   movq    %rsp, %rbp
 ; block0:
-;   movdqa  %xmm2, %xmm4
-;   pblendvb %xmm4, %xmm1, %xmm4
-;   movdqa  %xmm4, %xmm0
+;   movdqa  %xmm1, %xmm4
+;   pand    %xmm4, %xmm0, %xmm4
+;   pandn   %xmm0, %xmm2, %xmm0
+;   por     %xmm0, %xmm4, %xmm0
 ;   movq    %rbp, %rsp
 ;   popq    %rbp
 ;   ret
@@ -249,16 +250,17 @@ block0(v0: i16x8, v1: i16x8, v2: i16x8):
 ;   pushq %rbp
 ;   movq %rsp, %rbp
 ; block1: ; offset 0x4
-;   movdqa %xmm2, %xmm4
-;   pblendvb %xmm0, %xmm1, %xmm4
-;   movdqa %xmm4, %xmm0
+;   movdqa %xmm1, %xmm4
+;   pand %xmm0, %xmm4
+;   pandn %xmm2, %xmm0
+;   por %xmm4, %xmm0
 ;   movq %rbp, %rsp
 ;   popq %rbp
 ;   retq
 
-function %vselect_f32x4(i32x4, f32x4, f32x4) -> f32x4 {
-block0(v0: i32x4, v1: f32x4, v2: f32x4):
-    v3 = vselect v0, v1, v2
+function %vselect_f32x4(f32x4, f32x4, f32x4) -> f32x4 {
+block0(v0: f32x4, v1: f32x4, v2: f32x4):
+    v3 = bitselect v0, v1, v2
     return v3
 }
 
@@ -266,9 +268,10 @@ block0(v0: i32x4, v1: f32x4, v2: f32x4):
 ;   pushq   %rbp
 ;   movq    %rsp, %rbp
 ; block0:
-;   movdqa  %xmm2, %xmm4
-;   blendvps %xmm4, %xmm1, %xmm4
-;   movdqa  %xmm4, %xmm0
+;   movdqa  %xmm1, %xmm4
+;   andps   %xmm4, %xmm0, %xmm4
+;   andnps  %xmm0, %xmm2, %xmm0
+;   orps    %xmm0, %xmm4, %xmm0
 ;   movq    %rbp, %rsp
 ;   popq    %rbp
 ;   ret
@@ -278,16 +281,17 @@ block0(v0: i32x4, v1: f32x4, v2: f32x4):
 ;   pushq %rbp
 ;   movq %rsp, %rbp
 ; block1: ; offset 0x4
-;   movdqa %xmm2, %xmm4
-;   blendvps %xmm0, %xmm1, %xmm4
-;   movdqa %xmm4, %xmm0
+;   movdqa %xmm1, %xmm4
+;   andps %xmm0, %xmm4
+;   andnps %xmm2, %xmm0
+;   orps %xmm4, %xmm0
 ;   movq %rbp, %rsp
 ;   popq %rbp
 ;   retq
 
-function %vselect_f64x2(i64x2, f64x2, f64x2) -> f64x2 {
-block0(v0: i64x2, v1: f64x2, v2: f64x2):
-    v3 = vselect v0, v1, v2
+function %vselect_f64x2(f64x2, f64x2, f64x2) -> f64x2 {
+block0(v0: f64x2, v1: f64x2, v2: f64x2):
+    v3 = bitselect v0, v1, v2
     return v3
 }
 
@@ -295,9 +299,10 @@ block0(v0: i64x2, v1: f64x2, v2: f64x2):
 ;   pushq   %rbp
 ;   movq    %rsp, %rbp
 ; block0:
-;   movdqa  %xmm2, %xmm4
-;   blendvpd %xmm4, %xmm1, %xmm4
-;   movdqa  %xmm4, %xmm0
+;   movdqa  %xmm1, %xmm4
+;   andpd   %xmm4, %xmm0, %xmm4
+;   andnpd  %xmm0, %xmm2, %xmm0
+;   orpd    %xmm0, %xmm4, %xmm0
 ;   movq    %rbp, %rsp
 ;   popq    %rbp
 ;   ret
@@ -307,9 +312,10 @@ block0(v0: i64x2, v1: f64x2, v2: f64x2):
 ;   pushq %rbp
 ;   movq %rsp, %rbp
 ; block1: ; offset 0x4
-;   movdqa %xmm2, %xmm4
-;   blendvpd %xmm0, %xmm1, %xmm4
-;   movdqa %xmm4, %xmm0
+;   movdqa %xmm1, %xmm4
+;   andpd %xmm0, %xmm4
+;   andnpd %xmm2, %xmm0
+;   orpd %xmm4, %xmm0
 ;   movq %rbp, %rsp
 ;   popq %rbp
 ;   retq
@@ -485,8 +491,7 @@ block0:
 ; block0:
 ;   movdqu  const(1), %xmm0
 ;   psrlw   %xmm0, $1, %xmm0
-;   movdqu  const(0), %xmm3
-;   pand    %xmm0, %xmm3, %xmm0
+;   pand    %xmm0, const(0), %xmm0
 ;   movq    %rbp, %rsp
 ;   popq    %rbp
 ;   ret
@@ -496,28 +501,21 @@ block0:
 ;   pushq %rbp
 ;   movq %rsp, %rbp
 ; block1: ; offset 0x4
-;   movdqu 0x34(%rip), %xmm0
+;   movdqu 0x24(%rip), %xmm0
 ;   psrlw $1, %xmm0
-;   movdqu 0x17(%rip), %xmm3
-;   pand %xmm3, %xmm0
+;   pand 7(%rip), %xmm0
 ;   movq %rbp, %rsp
 ;   popq %rbp
 ;   retq
 ;   addb %al, (%rax)
-;   addb %al, (%rax)
-;   addb %al, (%rax)
-;   addb %al, (%rax)
-;   addb %al, (%rax)
-;   addb %al, (%rax)
-;   addb %al, (%rax)
-;   jg 0xb1
-;   jg 0xb3
-;   jg 0xb5
-;   jg 0xb7
-;   jg 0xb9
-;   jg 0xbb
-;   jg 0xbd
-;   jg 0xbf
+;   jg 0xa1
+;   jg 0xa3
+;   jg 0xa5
+;   jg 0xa7
+;   jg 0xa9
+;   jg 0xab
+;   jg 0xad
+;   jg 0xaf
 ;   addb %al, (%rcx)
 ;   addb (%rbx), %al
 ;   addb $5, %al
@@ -753,8 +751,8 @@ block0(v0: i64x2):
 ;   pushq   %rbp
 ;   movq    %rsp, %rbp
 ; block0:
-;   pextrd.w $0, %xmm0, %rdx
-;   pextrd.w $1, %xmm0, %r9
+;   pextrq  $0, %xmm0, %rdx
+;   pextrq  $1, %xmm0, %r9
 ;   sarq    $36, %rdx, %rdx
 ;   sarq    $36, %r9, %r9
 ;   uninit  %xmm0
@@ -789,8 +787,8 @@ block0(v0: i64x2, v1: i32):
 ;   pushq   %rbp
 ;   movq    %rsp, %rbp
 ; block0:
-;   pextrd.w $0, %xmm0, %r8
-;   pextrd.w $1, %xmm0, %r10
+;   pextrq  $0, %xmm0, %r8
+;   pextrq  $1, %xmm0, %r10
 ;   movq    %rdi, %rcx
 ;   sarq    %cl, %r8, %r8
 ;   sarq    %cl, %r10, %r10

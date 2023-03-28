@@ -2,7 +2,7 @@
 
 use crate::entity::SecondaryMap;
 use crate::flowgraph::{BlockPredecessor, ControlFlowGraph};
-use crate::ir::{Block, ExpandedProgramPoint, Function, Inst, Layout, ProgramOrder, Value};
+use crate::ir::{Block, Function, Inst, Layout, ProgramPoint};
 use crate::packed_option::PackedOption;
 use crate::timing;
 use alloc::vec::Vec;
@@ -88,7 +88,7 @@ impl DominatorTree {
     }
 
     /// Compare two blocks relative to the reverse post-order.
-    fn rpo_cmp_block(&self, a: Block, b: Block) -> Ordering {
+    pub fn rpo_cmp_block(&self, a: Block, b: Block) -> Ordering {
         self.nodes[a].rpo_number.cmp(&self.nodes[b].rpo_number)
     }
 
@@ -100,13 +100,13 @@ impl DominatorTree {
     /// If `a` and `b` belong to the same block, compare their relative position in the block.
     pub fn rpo_cmp<A, B>(&self, a: A, b: B, layout: &Layout) -> Ordering
     where
-        A: Into<ExpandedProgramPoint>,
-        B: Into<ExpandedProgramPoint>,
+        A: Into<ProgramPoint>,
+        B: Into<ProgramPoint>,
     {
         let a = a.into();
         let b = b.into();
         self.rpo_cmp_block(layout.pp_block(a), layout.pp_block(b))
-            .then(layout.cmp(a, b))
+            .then_with(|| layout.pp_cmp(a, b))
     }
 
     /// Returns `true` if `a` dominates `b`.
@@ -120,21 +120,21 @@ impl DominatorTree {
     /// An instruction is considered to dominate itself.
     pub fn dominates<A, B>(&self, a: A, b: B, layout: &Layout) -> bool
     where
-        A: Into<ExpandedProgramPoint>,
-        B: Into<ExpandedProgramPoint>,
+        A: Into<ProgramPoint>,
+        B: Into<ProgramPoint>,
     {
         let a = a.into();
         let b = b.into();
         match a {
-            ExpandedProgramPoint::Block(block_a) => {
+            ProgramPoint::Block(block_a) => {
                 a == b || self.last_dominator(block_a, b, layout).is_some()
             }
-            ExpandedProgramPoint::Inst(inst_a) => {
+            ProgramPoint::Inst(inst_a) => {
                 let block_a = layout
                     .inst_block(inst_a)
                     .expect("Instruction not in layout.");
                 match self.last_dominator(block_a, b, layout) {
-                    Some(last) => layout.cmp(inst_a, last) != Ordering::Greater,
+                    Some(last) => layout.pp_cmp(inst_a, last) != Ordering::Greater,
                     None => false,
                 }
             }
@@ -145,11 +145,11 @@ impl DominatorTree {
     /// If no instructions in `a` dominate `b`, return `None`.
     pub fn last_dominator<B>(&self, a: Block, b: B, layout: &Layout) -> Option<Inst>
     where
-        B: Into<ExpandedProgramPoint>,
+        B: Into<ProgramPoint>,
     {
         let (mut block_b, mut inst_b) = match b.into() {
-            ExpandedProgramPoint::Block(block) => (block, None),
-            ExpandedProgramPoint::Inst(inst) => (
+            ProgramPoint::Block(block) => (block, None),
+            ProgramPoint::Inst(inst) => (
                 layout.inst_block(inst).expect("Instruction not in layout."),
                 Some(inst),
             ),
@@ -210,7 +210,7 @@ impl DominatorTree {
         );
 
         // We're in the same block. The common dominator is the earlier instruction.
-        if layout.cmp(a.inst, b.inst) == Ordering::Less {
+        if layout.pp_cmp(a.inst, b.inst) == Ordering::Less {
             a
         } else {
             b
@@ -311,9 +311,17 @@ impl DominatorTree {
                         self.nodes[block].rpo_number = SEEN;
                         self.stack.push((Visit::Last, block));
                         if let Some(inst) = func.stencil.layout.last_inst(block) {
+                            // Heuristic: chase the children in reverse. This puts the first
+                            // successor block first in the postorder, all other things being
+                            // equal, which tends to prioritize loop backedges over out-edges,
+                            // putting the edge-block closer to the loop body and minimizing
+                            // live-ranges in linear instruction space. This heuristic doesn't have
+                            // any effect on the computation of dominators, and is purely for other
+                            // consumers of the postorder we cache here.
                             for block in func.stencil.dfg.insts[inst]
                                 .branch_destination(&func.stencil.dfg.jump_tables)
                                 .iter()
+                                .rev()
                             {
                                 let succ = block.block(&func.stencil.dfg.value_lists);
 
@@ -467,7 +475,9 @@ impl DominatorTreePreorder {
         // sibling lists are ordered according to the CFG reverse post-order.
         for &block in domtree.cfg_postorder() {
             if let Some(idom_inst) = domtree.idom(block) {
-                let idom = layout.pp_block(idom_inst);
+                let idom = layout
+                    .inst_block(idom_inst)
+                    .expect("Instruction not in layout.");
                 let sib = mem::replace(&mut self.nodes[idom].child, block.into());
                 self.nodes[block].sibling = sib;
             } else {
@@ -497,7 +507,9 @@ impl DominatorTreePreorder {
         // its dominator tree children.
         for &block in domtree.cfg_postorder() {
             if let Some(idom_inst) = domtree.idom(block) {
-                let idom = layout.pp_block(idom_inst);
+                let idom = layout
+                    .inst_block(idom_inst)
+                    .expect("Instruction not in layout.");
                 let pre_max = cmp::max(self.nodes[block].pre_max, self.nodes[idom].pre_max);
                 self.nodes[idom].pre_max = pre_max;
             }
@@ -560,26 +572,13 @@ impl DominatorTreePreorder {
     /// program points dominated by pp follow immediately and contiguously after pp in the order.
     pub fn pre_cmp<A, B>(&self, a: A, b: B, layout: &Layout) -> Ordering
     where
-        A: Into<ExpandedProgramPoint>,
-        B: Into<ExpandedProgramPoint>,
+        A: Into<ProgramPoint>,
+        B: Into<ProgramPoint>,
     {
         let a = a.into();
         let b = b.into();
         self.pre_cmp_block(layout.pp_block(a), layout.pp_block(b))
-            .then(layout.cmp(a, b))
-    }
-
-    /// Compare two value defs according to the dominator tree pre-order.
-    ///
-    /// Two values defined at the same program point are compared according to their parameter or
-    /// result order.
-    ///
-    /// This is a total ordering of the values in the function.
-    pub fn pre_cmp_def(&self, a: Value, b: Value, func: &Function) -> Ordering {
-        let da = func.dfg.value_def(a);
-        let db = func.dfg.value_def(b);
-        self.pre_cmp(da, db, &func.layout)
-            .then_with(|| da.num().cmp(&db.num()))
+            .then_with(|| layout.pp_cmp(a, b))
     }
 }
 
@@ -641,7 +640,7 @@ mod tests {
         //       return
         //     } block2
         // } block0
-        assert_eq!(dt.cfg_postorder(), &[trap_block, block2, block0]);
+        assert_eq!(dt.cfg_postorder(), &[block2, trap_block, block0]);
 
         let v2_def = cur.func.dfg.value_def(v2).unwrap_inst();
         assert!(!dt.dominates(v2_def, block0, &cur.func.layout));

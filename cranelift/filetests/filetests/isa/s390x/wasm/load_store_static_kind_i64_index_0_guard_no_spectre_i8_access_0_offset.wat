@@ -42,27 +42,27 @@
 ;;   unwind StackAlloc { size: 0 }
 ;; block0:
 ;;   clgfi %r2, 268435455
-;;   jgh label1 ; jg label2
-;; block2:
-;;   lg %r5, 0(%r4)
-;;   stc %r3, 0(%r2,%r5)
-;;   jg label3
-;; block3:
-;;   br %r14
+;;   jgh label3 ; jg label1
 ;; block1:
-;;   trap
+;;   lg %r4, 0(%r4)
+;;   stc %r3, 0(%r2,%r4)
+;;   jg label2
+;; block2:
+;;   br %r14
+;; block3:
+;;   .word 0x0000 # trap=heap_oob
 ;;
 ;; function u0:1:
 ;;   unwind DefineNewFrame { offset_upward_to_caller_sp: 160, offset_downward_to_clobbers: 0 }
 ;;   unwind StackAlloc { size: 0 }
 ;; block0:
 ;;   clgfi %r2, 268435455
-;;   jgh label1 ; jg label2
-;; block2:
-;;   lg %r5, 0(%r3)
-;;   llc %r2, 0(%r2,%r5)
-;;   jg label3
-;; block3:
-;;   br %r14
+;;   jgh label3 ; jg label1
 ;; block1:
-;;   trap
+;;   lg %r4, 0(%r3)
+;;   llc %r2, 0(%r2,%r4)
+;;   jg label2
+;; block2:
+;;   br %r14
+;; block3:
+;;   .word 0x0000 # trap=heap_oob

@@ -12,6 +12,8 @@ use smallvec::{smallvec, SmallVec};
 use std::fmt;
 use std::string::String;
 
+pub use crate::isa::x64::lower::isle::generated_code::DivSignedness;
+
 /// An extenstion trait for converting `Writable{Xmm,Gpr}` to `Writable<Reg>`.
 pub trait ToWritableReg {
     /// Convert `Writable{Xmm,Gpr}` to `Writable<Reg>`.
@@ -31,8 +33,8 @@ macro_rules! newtype_of_reg {
         $newtype_reg:ident,
         $newtype_writable_reg:ident,
         $newtype_option_writable_reg:ident,
-        $newtype_reg_mem:ident,
-        $newtype_reg_mem_imm:ident,
+        reg_mem: ($($newtype_reg_mem:ident $(aligned:$aligned:ident)?),*),
+        reg_mem_imm: ($($newtype_reg_mem_imm:ident $(aligned:$aligned_imm:ident)?),*),
         $newtype_imm8_reg:ident,
         |$check_reg:ident| $check:expr
     ) => {
@@ -102,108 +104,130 @@ macro_rules! newtype_of_reg {
             }
         }
 
-        /// A newtype wrapper around `RegMem` for general-purpose registers.
-        #[derive(Clone, Debug)]
-        pub struct $newtype_reg_mem(RegMem);
+        $(
+            /// A newtype wrapper around `RegMem` for general-purpose registers.
+            #[derive(Clone, Debug)]
+            pub struct $newtype_reg_mem(RegMem);
 
-        impl From<$newtype_reg_mem> for RegMem {
-            fn from(rm: $newtype_reg_mem) -> Self {
-                rm.0
-            }
-        }
-
-        impl From<$newtype_reg> for $newtype_reg_mem {
-            fn from(r: $newtype_reg) -> Self {
-                $newtype_reg_mem(RegMem::reg(r.into()))
-            }
-        }
-
-        impl $newtype_reg_mem {
-            /// Construct a `RegMem` newtype from the given `RegMem`, or return
-            /// `None` if the `RegMem` is not a valid instance of this `RegMem`
-            /// newtype.
-            pub fn new(rm: RegMem) -> Option<Self> {
-                match rm {
-                    RegMem::Mem { addr: _ } => Some(Self(rm)),
-                    RegMem::Reg { reg: $check_reg } if $check => Some(Self(rm)),
-                    RegMem::Reg { reg: _ } => None,
+            impl From<$newtype_reg_mem> for RegMem {
+                fn from(rm: $newtype_reg_mem) -> Self {
+                    rm.0
                 }
             }
 
-            /// Convert this newtype into its underlying `RegMem`.
-            pub fn to_reg_mem(self) -> RegMem {
-                self.0
-            }
-
-            #[allow(dead_code)] // Used by some newtypes and not others.
-            pub(crate) fn get_operands<F: Fn(VReg) -> VReg>(
-                &self,
-                collector: &mut OperandCollector<'_, F>,
-            ) {
-                self.0.get_operands(collector);
-            }
-        }
-        impl PrettyPrint for $newtype_reg_mem {
-            fn pretty_print(&self, size: u8, allocs: &mut AllocationConsumer<'_>) -> String {
-                self.0.pretty_print(size, allocs)
-            }
-        }
-
-        /// A newtype wrapper around `RegMemImm`.
-        #[derive(Clone, Debug)]
-        pub struct $newtype_reg_mem_imm(RegMemImm);
-
-        impl From<$newtype_reg_mem_imm> for RegMemImm {
-            fn from(rmi: $newtype_reg_mem_imm) -> RegMemImm {
-                rmi.0
-            }
-        }
-
-        impl From<$newtype_reg> for $newtype_reg_mem_imm {
-            fn from(r: $newtype_reg) -> Self {
-                $newtype_reg_mem_imm(RegMemImm::reg(r.into()))
-            }
-        }
-
-        impl From<$newtype_reg_mem> for $newtype_reg_mem_imm {
-            fn from(r: $newtype_reg_mem) -> Self {
-                $newtype_reg_mem_imm(r.0.into())
-            }
-        }
-
-        impl $newtype_reg_mem_imm {
-            /// Construct this newtype from the given `RegMemImm`, or return
-            /// `None` if the `RegMemImm` is not a valid instance of this
-            /// newtype.
-            pub fn new(rmi: RegMemImm) -> Option<Self> {
-                match rmi {
-                    RegMemImm::Imm { .. } => Some(Self(rmi)),
-                    RegMemImm::Mem { addr: _ } => Some(Self(rmi)),
-                    RegMemImm::Reg { reg: $check_reg } if $check => Some(Self(rmi)),
-                    RegMemImm::Reg { reg: _ } => None,
+            impl From<$newtype_reg> for $newtype_reg_mem {
+                fn from(r: $newtype_reg) -> Self {
+                    $newtype_reg_mem(RegMem::reg(r.into()))
                 }
             }
 
-            /// Convert this newtype into its underlying `RegMemImm`.
-            #[allow(dead_code)] // Used by some newtypes and not others.
-            pub fn to_reg_mem_imm(self) -> RegMemImm {
-                self.0
+            impl $newtype_reg_mem {
+                /// Construct a `RegMem` newtype from the given `RegMem`, or return
+                /// `None` if the `RegMem` is not a valid instance of this `RegMem`
+                /// newtype.
+                pub fn new(rm: RegMem) -> Option<Self> {
+                    match rm {
+                        RegMem::Mem { addr } => {
+                            let mut _allow = true;
+                            $(
+                                if $aligned {
+                                    _allow = addr.aligned();
+                                }
+                            )?
+                            if _allow {
+                                Some(Self(RegMem::Mem { addr }))
+                            } else {
+                                None
+                            }
+                        }
+                        RegMem::Reg { reg: $check_reg } if $check => Some(Self(rm)),
+                        RegMem::Reg { reg: _ } => None,
+                    }
+                }
+
+                /// Convert this newtype into its underlying `RegMem`.
+                pub fn to_reg_mem(self) -> RegMem {
+                    self.0
+                }
+
+                #[allow(dead_code)] // Used by some newtypes and not others.
+                pub(crate) fn get_operands<F: Fn(VReg) -> VReg>(
+                    &self,
+                    collector: &mut OperandCollector<'_, F>,
+                ) {
+                    self.0.get_operands(collector);
+                }
+            }
+            impl PrettyPrint for $newtype_reg_mem {
+                fn pretty_print(&self, size: u8, allocs: &mut AllocationConsumer<'_>) -> String {
+                    self.0.pretty_print(size, allocs)
+                }
+            }
+        )*
+
+        $(
+            /// A newtype wrapper around `RegMemImm`.
+            #[derive(Clone, Debug)]
+            pub struct $newtype_reg_mem_imm(RegMemImm);
+
+            impl From<$newtype_reg_mem_imm> for RegMemImm {
+                fn from(rmi: $newtype_reg_mem_imm) -> RegMemImm {
+                    rmi.0
+                }
             }
 
-            #[allow(dead_code)] // Used by some newtypes and not others.
-            pub(crate) fn get_operands<F: Fn(VReg) -> VReg>(
-                &self,
-                collector: &mut OperandCollector<'_, F>,
-            ) {
-                self.0.get_operands(collector);
+            impl From<$newtype_reg> for $newtype_reg_mem_imm {
+                fn from(r: $newtype_reg) -> Self {
+                    $newtype_reg_mem_imm(RegMemImm::reg(r.into()))
+                }
             }
-        }
 
-        impl PrettyPrint for $newtype_reg_mem_imm {
-            fn pretty_print(&self, size: u8, allocs: &mut AllocationConsumer<'_>) -> String {
-                self.0.pretty_print(size, allocs)
+            impl $newtype_reg_mem_imm {
+                /// Construct this newtype from the given `RegMemImm`, or return
+                /// `None` if the `RegMemImm` is not a valid instance of this
+                /// newtype.
+                pub fn new(rmi: RegMemImm) -> Option<Self> {
+                    match rmi {
+                        RegMemImm::Imm { .. } => Some(Self(rmi)),
+                        RegMemImm::Mem { addr } => {
+                            let mut _allow = true;
+                            $(
+                                if $aligned_imm {
+                                    _allow = addr.aligned();
+                                }
+                            )?
+                            if _allow {
+                                Some(Self(RegMemImm::Mem { addr }))
+                            } else {
+                                None
+                            }
+                        }
+                        RegMemImm::Reg { reg: $check_reg } if $check => Some(Self(rmi)),
+                        RegMemImm::Reg { reg: _ } => None,
+                    }
+                }
+
+                /// Convert this newtype into its underlying `RegMemImm`.
+                #[allow(dead_code)] // Used by some newtypes and not others.
+                pub fn to_reg_mem_imm(self) -> RegMemImm {
+                    self.0
+                }
+
+                #[allow(dead_code)] // Used by some newtypes and not others.
+                pub(crate) fn get_operands<F: Fn(VReg) -> VReg>(
+                    &self,
+                    collector: &mut OperandCollector<'_, F>,
+                ) {
+                    self.0.get_operands(collector);
+                }
             }
-        }
+
+            impl PrettyPrint for $newtype_reg_mem_imm {
+                fn pretty_print(&self, size: u8, allocs: &mut AllocationConsumer<'_>) -> String {
+                    self.0.pretty_print(size, allocs)
+                }
+            }
+        )*
 
         /// A newtype wrapper around `Imm8Reg`.
         #[derive(Clone, Debug)]
@@ -242,8 +266,8 @@ newtype_of_reg!(
     Gpr,
     WritableGpr,
     OptionWritableGpr,
-    GprMem,
-    GprMemImm,
+    reg_mem: (GprMem),
+    reg_mem_imm: (GprMemImm),
     Imm8Gpr,
     |reg| reg.class() == RegClass::Int
 );
@@ -253,8 +277,8 @@ newtype_of_reg!(
     Xmm,
     WritableXmm,
     OptionWritableXmm,
-    XmmMem,
-    XmmMemImm,
+    reg_mem: (XmmMem, XmmMemAligned aligned:true),
+    reg_mem_imm: (XmmMemImm, XmmMemAlignedImm aligned:true),
     Imm8Xmm,
     |reg| reg.class() == RegClass::Float
 );
@@ -420,6 +444,10 @@ impl Amode {
         }
         ret
     }
+
+    pub(crate) fn aligned(&self) -> bool {
+        self.get_flags().aligned()
+    }
 }
 
 impl PrettyPrint for Amode {
@@ -529,6 +557,13 @@ impl SyntheticAmode {
             &SyntheticAmode::NominalSPOffset { .. } | &SyntheticAmode::ConstantOffset { .. } => {
                 self.clone()
             }
+        }
+    }
+
+    pub(crate) fn aligned(&self) -> bool {
+        match self {
+            SyntheticAmode::Real(addr) => addr.aligned(),
+            SyntheticAmode::NominalSPOffset { .. } | SyntheticAmode::ConstantOffset { .. } => true,
         }
     }
 }
@@ -893,6 +928,7 @@ pub(crate) enum InstructionSet {
     BMI2,
     FMA,
     AVX,
+    AVX2,
     AVX512BITALG,
     AVX512DQ,
     AVX512F,
@@ -999,6 +1035,7 @@ pub enum SseOpcode {
     Pextrb,
     Pextrw,
     Pextrd,
+    Pextrq,
     Pinsrb,
     Pinsrw,
     Pinsrd,
@@ -1081,6 +1118,16 @@ pub enum SseOpcode {
     Unpcklps,
     Xorps,
     Xorpd,
+    Phaddw,
+    Phaddd,
+    Punpckhdq,
+    Punpckldq,
+    Punpckhqdq,
+    Punpcklqdq,
+    Pshuflw,
+    Pshufhw,
+    Pblendw,
+    Movddup,
 }
 
 impl SseOpcode {
@@ -1220,14 +1267,23 @@ impl SseOpcode {
             | SseOpcode::Subpd
             | SseOpcode::Subsd
             | SseOpcode::Ucomisd
-            | SseOpcode::Xorpd => SSE2,
+            | SseOpcode::Xorpd
+            | SseOpcode::Punpckldq
+            | SseOpcode::Punpckhdq
+            | SseOpcode::Punpcklqdq
+            | SseOpcode::Punpckhqdq
+            | SseOpcode::Pshuflw
+            | SseOpcode::Pshufhw => SSE2,
 
             SseOpcode::Pabsb
             | SseOpcode::Pabsw
             | SseOpcode::Pabsd
             | SseOpcode::Palignr
             | SseOpcode::Pmulhrsw
-            | SseOpcode::Pshufb => SSSE3,
+            | SseOpcode::Pshufb
+            | SseOpcode::Phaddw
+            | SseOpcode::Phaddd
+            | SseOpcode::Movddup => SSSE3,
 
             SseOpcode::Blendvpd
             | SseOpcode::Blendvps
@@ -1237,6 +1293,7 @@ impl SseOpcode {
             | SseOpcode::Pcmpeqq
             | SseOpcode::Pextrb
             | SseOpcode::Pextrd
+            | SseOpcode::Pextrq
             | SseOpcode::Pinsrb
             | SseOpcode::Pinsrd
             | SseOpcode::Pmaxsb
@@ -1265,7 +1322,8 @@ impl SseOpcode {
             | SseOpcode::Roundps
             | SseOpcode::Roundpd
             | SseOpcode::Roundss
-            | SseOpcode::Roundsd => SSE41,
+            | SseOpcode::Roundsd
+            | SseOpcode::Pblendw => SSE41,
 
             SseOpcode::Pcmpgtq => SSE42,
         }
@@ -1276,22 +1334,6 @@ impl SseOpcode {
         match self {
             SseOpcode::Movd => 4,
             _ => 8,
-        }
-    }
-
-    /// Does an XmmRmmRImm with this opcode use src1? FIXME: split
-    /// into separate instructions.
-    pub(crate) fn uses_src1(&self) -> bool {
-        match self {
-            SseOpcode::Pextrb => false,
-            SseOpcode::Pextrw => false,
-            SseOpcode::Pextrd => false,
-            SseOpcode::Pshufd => false,
-            SseOpcode::Roundss => false,
-            SseOpcode::Roundsd => false,
-            SseOpcode::Roundps => false,
-            SseOpcode::Roundpd => false,
-            _ => true,
         }
     }
 }
@@ -1393,6 +1435,7 @@ impl fmt::Debug for SseOpcode {
             SseOpcode::Pextrb => "pextrb",
             SseOpcode::Pextrw => "pextrw",
             SseOpcode::Pextrd => "pextrd",
+            SseOpcode::Pextrq => "pextrq",
             SseOpcode::Pinsrb => "pinsrb",
             SseOpcode::Pinsrw => "pinsrw",
             SseOpcode::Pinsrd => "pinsrd",
@@ -1475,6 +1518,16 @@ impl fmt::Debug for SseOpcode {
             SseOpcode::Unpcklps => "unpcklps",
             SseOpcode::Xorps => "xorps",
             SseOpcode::Xorpd => "xorpd",
+            SseOpcode::Phaddw => "phaddw",
+            SseOpcode::Phaddd => "phaddd",
+            SseOpcode::Punpckldq => "punpckldq",
+            SseOpcode::Punpckhdq => "punpckhdq",
+            SseOpcode::Punpcklqdq => "punpcklqdq",
+            SseOpcode::Punpckhqdq => "punpckhqdq",
+            SseOpcode::Pshuflw => "pshuflw",
+            SseOpcode::Pshufhw => "pshufhw",
+            SseOpcode::Pblendw => "pblendw",
+            SseOpcode::Movddup => "movddup",
         };
         write!(fmt, "{}", name)
     }
@@ -1495,7 +1548,19 @@ impl AvxOpcode {
             AvxOpcode::Vfmadd213ss
             | AvxOpcode::Vfmadd213sd
             | AvxOpcode::Vfmadd213ps
-            | AvxOpcode::Vfmadd213pd => smallvec![InstructionSet::FMA],
+            | AvxOpcode::Vfmadd213pd
+            | AvxOpcode::Vfmadd132ss
+            | AvxOpcode::Vfmadd132sd
+            | AvxOpcode::Vfmadd132ps
+            | AvxOpcode::Vfmadd132pd
+            | AvxOpcode::Vfnmadd213ss
+            | AvxOpcode::Vfnmadd213sd
+            | AvxOpcode::Vfnmadd213ps
+            | AvxOpcode::Vfnmadd213pd
+            | AvxOpcode::Vfnmadd132ss
+            | AvxOpcode::Vfnmadd132sd
+            | AvxOpcode::Vfnmadd132ps
+            | AvxOpcode::Vfnmadd132pd => smallvec![InstructionSet::FMA],
             AvxOpcode::Vminps
             | AvxOpcode::Vminpd
             | AvxOpcode::Vmaxps
@@ -1598,8 +1663,71 @@ impl AvxOpcode {
             | AvxOpcode::Vpslld
             | AvxOpcode::Vpsllq
             | AvxOpcode::Vpsraw
-            | AvxOpcode::Vpsrad => {
+            | AvxOpcode::Vpsrad
+            | AvxOpcode::Vpmovsxbw
+            | AvxOpcode::Vpmovzxbw
+            | AvxOpcode::Vpmovsxwd
+            | AvxOpcode::Vpmovzxwd
+            | AvxOpcode::Vpmovsxdq
+            | AvxOpcode::Vpmovzxdq
+            | AvxOpcode::Vaddss
+            | AvxOpcode::Vaddsd
+            | AvxOpcode::Vmulss
+            | AvxOpcode::Vmulsd
+            | AvxOpcode::Vsubss
+            | AvxOpcode::Vsubsd
+            | AvxOpcode::Vdivss
+            | AvxOpcode::Vdivsd
+            | AvxOpcode::Vpabsb
+            | AvxOpcode::Vpabsw
+            | AvxOpcode::Vpabsd
+            | AvxOpcode::Vminss
+            | AvxOpcode::Vminsd
+            | AvxOpcode::Vmaxss
+            | AvxOpcode::Vmaxsd
+            | AvxOpcode::Vsqrtps
+            | AvxOpcode::Vsqrtpd
+            | AvxOpcode::Vroundpd
+            | AvxOpcode::Vroundps
+            | AvxOpcode::Vcvtdq2pd
+            | AvxOpcode::Vcvtdq2ps
+            | AvxOpcode::Vcvtpd2ps
+            | AvxOpcode::Vcvtps2pd
+            | AvxOpcode::Vcvttpd2dq
+            | AvxOpcode::Vcvttps2dq
+            | AvxOpcode::Vphaddw
+            | AvxOpcode::Vphaddd
+            | AvxOpcode::Vpunpckldq
+            | AvxOpcode::Vpunpckhdq
+            | AvxOpcode::Vpunpcklqdq
+            | AvxOpcode::Vpunpckhqdq
+            | AvxOpcode::Vpshuflw
+            | AvxOpcode::Vpshufhw
+            | AvxOpcode::Vpshufd
+            | AvxOpcode::Vmovss
+            | AvxOpcode::Vmovsd
+            | AvxOpcode::Vmovups
+            | AvxOpcode::Vmovupd
+            | AvxOpcode::Vmovdqu
+            | AvxOpcode::Vpextrb
+            | AvxOpcode::Vpextrw
+            | AvxOpcode::Vpextrd
+            | AvxOpcode::Vpextrq
+            | AvxOpcode::Vpblendw
+            | AvxOpcode::Vmovddup
+            | AvxOpcode::Vbroadcastss
+            | AvxOpcode::Vmovd
+            | AvxOpcode::Vmovq
+            | AvxOpcode::Vmovmskps
+            | AvxOpcode::Vmovmskpd
+            | AvxOpcode::Vpmovmskb
+            | AvxOpcode::Vcvtsi2ss
+            | AvxOpcode::Vcvtsi2sd => {
                 smallvec![InstructionSet::AVX]
+            }
+
+            AvxOpcode::Vpbroadcastb | AvxOpcode::Vpbroadcastw | AvxOpcode::Vpbroadcastd => {
+                smallvec![InstructionSet::AVX2]
             }
         }
     }
@@ -1770,35 +1898,6 @@ impl fmt::Debug for ShiftKind {
 impl fmt::Display for ShiftKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Debug::fmt(self, f)
-    }
-}
-
-/// What kind of division or remainder instruction this is?
-#[derive(Clone, Eq, PartialEq)]
-pub enum DivOrRemKind {
-    /// Signed division.
-    SignedDiv,
-    /// Unsigned division.
-    UnsignedDiv,
-    /// Signed remainder.
-    SignedRem,
-    /// Unsigned remainder.
-    UnsignedRem,
-}
-
-impl DivOrRemKind {
-    pub(crate) fn is_signed(&self) -> bool {
-        match self {
-            DivOrRemKind::SignedDiv | DivOrRemKind::SignedRem => true,
-            _ => false,
-        }
-    }
-
-    pub(crate) fn is_div(&self) -> bool {
-        match self {
-            DivOrRemKind::SignedDiv | DivOrRemKind::UnsignedDiv => true,
-            _ => false,
-        }
     }
 }
 

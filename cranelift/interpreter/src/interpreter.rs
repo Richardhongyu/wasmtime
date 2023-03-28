@@ -2,17 +2,17 @@
 //!
 //! This module partially contains the logic for interpreting Cranelift IR.
 
-use crate::address::{Address, AddressRegion, AddressSize};
+use crate::address::{Address, AddressFunctionEntry, AddressRegion, AddressSize};
 use crate::environment::{FuncIndex, FunctionStore};
 use crate::frame::Frame;
 use crate::instruction::DfgInstructionContext;
-use crate::state::{MemoryError, State};
+use crate::state::{InterpreterFunctionRef, MemoryError, State};
 use crate::step::{step, ControlFlow, StepError};
 use crate::value::{Value, ValueError};
 use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::{
-    ArgumentPurpose, Block, FuncRef, Function, GlobalValue, GlobalValueData, LibCall, StackSlot,
-    TrapCode, Type, Value as ValueRef,
+    ArgumentPurpose, Block, Endianness, ExternalName, FuncRef, Function, GlobalValue,
+    GlobalValueData, LibCall, MemFlags, StackSlot, TrapCode, Type, Value as ValueRef,
 };
 use log::trace;
 use smallvec::SmallVec;
@@ -192,10 +192,16 @@ pub struct InterpreterState<'a> {
     pub frame_offset: usize,
     pub stack: Vec<u8>,
     pub pinned_reg: DataValue,
+    pub native_endianness: Endianness,
 }
 
 impl Default for InterpreterState<'_> {
     fn default() -> Self {
+        let native_endianness = if cfg!(target_endian = "little") {
+            Endianness::Little
+        } else {
+            Endianness::Big
+        };
         Self {
             functions: FunctionStore::default(),
             libcall_handler: |_, _| Err(TrapCode::UnreachableCodeReached),
@@ -203,6 +209,7 @@ impl Default for InterpreterState<'_> {
             frame_offset: 0,
             stack: Vec::with_capacity(1024),
             pinned_reg: DataValue::U64(0),
+            native_endianness,
         }
     }
 }
@@ -308,7 +315,12 @@ impl<'a> State<'a, DataValue> for InterpreterState<'a> {
         Address::from_parts(size, AddressRegion::Stack, 0, final_offset)
     }
 
-    fn checked_load(&self, addr: Address, ty: Type) -> Result<DataValue, MemoryError> {
+    fn checked_load(
+        &self,
+        addr: Address,
+        ty: Type,
+        mem_flags: MemFlags,
+    ) -> Result<DataValue, MemoryError> {
         let load_size = ty.bytes() as usize;
         let addr_start = addr.offset as usize;
         let addr_end = addr_start + load_size;
@@ -324,10 +336,23 @@ impl<'a> State<'a, DataValue> for InterpreterState<'a> {
             _ => unimplemented!(),
         };
 
-        Ok(DataValue::read_from_slice(src, ty))
+        // Aligned flag is set and address is not aligned for the given type
+        if mem_flags.aligned() && addr_start % load_size != 0 {
+            return Err(MemoryError::MisalignedLoad { addr, load_size });
+        }
+
+        Ok(match mem_flags.endianness(self.native_endianness) {
+            Endianness::Big => DataValue::read_from_slice_be(src, ty),
+            Endianness::Little => DataValue::read_from_slice_le(src, ty),
+        })
     }
 
-    fn checked_store(&mut self, addr: Address, v: DataValue) -> Result<(), MemoryError> {
+    fn checked_store(
+        &mut self,
+        addr: Address,
+        v: DataValue,
+        mem_flags: MemFlags,
+    ) -> Result<(), MemoryError> {
         let store_size = v.ty().bytes() as usize;
         let addr_start = addr.offset as usize;
         let addr_end = addr_start + store_size;
@@ -343,7 +368,72 @@ impl<'a> State<'a, DataValue> for InterpreterState<'a> {
             _ => unimplemented!(),
         };
 
-        Ok(v.write_to_slice(dst))
+        // Aligned flag is set and address is not aligned for the given type
+        if mem_flags.aligned() && addr_start % store_size != 0 {
+            return Err(MemoryError::MisalignedStore { addr, store_size });
+        }
+
+        Ok(match mem_flags.endianness(self.native_endianness) {
+            Endianness::Big => v.write_to_slice_be(dst),
+            Endianness::Little => v.write_to_slice_le(dst),
+        })
+    }
+
+    fn function_address(
+        &self,
+        size: AddressSize,
+        name: &ExternalName,
+    ) -> Result<Address, MemoryError> {
+        let curr_func = self.get_current_function();
+        let (entry, index) = match name {
+            ExternalName::User(username) => {
+                let ext_name = &curr_func.params.user_named_funcs()[*username];
+
+                // TODO: This is not optimal since we are looking up by string name
+                let index = self.functions.index_of(&ext_name.to_string()).unwrap();
+
+                (AddressFunctionEntry::UserFunction, index.as_u32())
+            }
+
+            ExternalName::TestCase(testname) => {
+                // TODO: This is not optimal since we are looking up by string name
+                let index = self.functions.index_of(&testname.to_string()).unwrap();
+
+                (AddressFunctionEntry::UserFunction, index.as_u32())
+            }
+            ExternalName::LibCall(libcall) => {
+                // We don't properly have a "libcall" store, but we can use `LibCall::all()`
+                // and index into that.
+                let index = LibCall::all_libcalls()
+                    .iter()
+                    .position(|lc| lc == libcall)
+                    .unwrap();
+
+                (AddressFunctionEntry::LibCall, index as u32)
+            }
+            _ => unimplemented!("function_address: {:?}", name),
+        };
+
+        Address::from_parts(size, AddressRegion::Function, entry as u64, index as u64)
+    }
+
+    fn get_function_from_address(&self, address: Address) -> Option<InterpreterFunctionRef<'a>> {
+        let index = address.offset as u32;
+        if address.region != AddressRegion::Function {
+            return None;
+        }
+
+        match AddressFunctionEntry::from(address.entry) {
+            AddressFunctionEntry::UserFunction => self
+                .functions
+                .get_by_index(FuncIndex::from_u32(index))
+                .map(InterpreterFunctionRef::from),
+
+            AddressFunctionEntry::LibCall => LibCall::all_libcalls()
+                .get(index as usize)
+                .copied()
+                .map(InterpreterFunctionRef::from),
+        }
     }
 
     /// Non-Recursively resolves a global value until its address is found
@@ -436,9 +526,10 @@ impl<'a> State<'a, DataValue> for InterpreterState<'a> {
                     global_type,
                 }) => {
                     let mut addr = Address::try_from(current_val)?;
+                    let mem_flags = MemFlags::trusted();
                     // We can forego bounds checking here since its performed in `checked_load`
                     addr.offset += offset as u64;
-                    current_val = self.checked_load(addr, global_type)?;
+                    current_val = self.checked_load(addr, global_type, mem_flags)?;
                 }
 
                 // We are done resolving this, return the current value
@@ -883,5 +974,56 @@ mod tests {
             .unwrap_return();
 
         assert_eq!(result, vec![DataValue::F32(Ieee32::with_float(1.0))])
+    }
+
+    #[test]
+    fn misaligned_store_traps() {
+        let code = "
+        function %test() {
+            ss0 = explicit_slot 16
+
+        block0:
+            v0 = stack_addr.i64 ss0
+            v1 = iconst.i64 1
+            store.i64 aligned v1, v0+2
+            return
+        }";
+
+        let func = parse_functions(code).unwrap().into_iter().next().unwrap();
+        let mut env = FunctionStore::default();
+        env.add(func.name.to_string(), &func);
+        let state = InterpreterState::default().with_function_store(env);
+        let trap = Interpreter::new(state)
+            .call_by_name("%test", &[])
+            .unwrap()
+            .unwrap_trap();
+
+        assert_eq!(trap, CraneliftTrap::User(TrapCode::HeapMisaligned));
+    }
+
+    #[test]
+    fn misaligned_load_traps() {
+        let code = "
+        function %test() {
+            ss0 = explicit_slot 16
+
+        block0:
+            v0 = stack_addr.i64 ss0
+            v1 = iconst.i64 1
+            store.i64 aligned v1, v0
+            v2 = load.i64 aligned v0+2
+            return
+        }";
+
+        let func = parse_functions(code).unwrap().into_iter().next().unwrap();
+        let mut env = FunctionStore::default();
+        env.add(func.name.to_string(), &func);
+        let state = InterpreterState::default().with_function_store(env);
+        let trap = Interpreter::new(state)
+            .call_by_name("%test", &[])
+            .unwrap()
+            .unwrap_trap();
+
+        assert_eq!(trap, CraneliftTrap::User(TrapCode::HeapMisaligned));
     }
 }

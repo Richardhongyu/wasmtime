@@ -45,6 +45,11 @@ fn main() -> anyhow::Result<()> {
                     strategy,
                 )?;
                 test_directory_module(out, "tests/spec_testsuite/proposals/threads", strategy)?;
+                test_directory_module(
+                    out,
+                    "tests/spec_testsuite/proposals/relaxed-simd",
+                    strategy,
+                )?;
             } else {
                 println!(
                     "cargo:warning=The spec testsuite is disabled. To enable, run `git submodule \
@@ -64,6 +69,7 @@ fn main() -> anyhow::Result<()> {
     drop(Command::new("rustfmt").arg(&output).status());
     Ok(())
 }
+
 fn test_directory_module(
     out: &mut String,
     path: impl AsRef<Path>,
@@ -173,6 +179,12 @@ fn write_testsuite_tests(
 /// Ignore tests that aren't supported yet.
 fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
     assert_eq!(strategy, "Cranelift");
+
+    // This is an empty file right now which the `wast` crate doesn't parse
+    if testname.contains("memory_copy1") {
+        return true;
+    }
+
     match env::var("CARGO_CFG_TARGET_ARCH").unwrap().as_str() {
         "s390x" => {
             // FIXME: These tests fail under qemu due to a qemu bug.
@@ -182,7 +194,9 @@ fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
         // Currently the simd wasm proposal is not implemented in the riscv64
         // backend so skip all tests which could use simd.
         "riscv64" => {
-            testsuite == "simd" || testname.contains("simd") || testname.contains("memory_multi")
+            testsuite.contains("simd")
+                || testname.contains("simd")
+                || testname.contains("memory_multi")
         }
 
         _ => false,

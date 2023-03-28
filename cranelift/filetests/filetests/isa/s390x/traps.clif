@@ -12,7 +12,7 @@ block0:
 
 ; VCode:
 ; block0:
-;   trap
+;   .word 0x0000 # trap=user0
 ; 
 ; Disassembled:
 ; block0: ; offset 0x0
@@ -25,7 +25,7 @@ block0:
 
 ; VCode:
 ; block0:
-;   trap
+;   .word 0x0000 # trap=user0
 ; 
 ; Disassembled:
 ; block0: ; offset 0x0
@@ -42,11 +42,11 @@ block0(v0: i64):
 ; VCode:
 ; block0:
 ;   clgfi %r2, 42
-;   jge label1 ; jg label2
-; block1:
-;   br %r14
+;   jge label2 ; jg label1
 ; block2:
-;   trap
+;   br %r14
+; block1:
+;   .word 0x0000 # trap=user0
 ; 
 ; Disassembled:
 ; block0: ; offset 0x0
@@ -68,11 +68,11 @@ block0(v0: i64):
 ; VCode:
 ; block0:
 ;   clgfi %r2, 42
-;   jge label1 ; jg label2
-; block2:
-;   br %r14
+;   jge label2 ; jg label1
 ; block1:
-;   trap
+;   br %r14
+; block2:
+;   .word 0x0000 # trap=user0
 ; 
 ; Disassembled:
 ; block0: ; offset 0x0
@@ -94,11 +94,11 @@ block0(v0: i64):
 ; VCode:
 ; block0:
 ;   clgfi %r2, 42
-;   jge label1 ; jg label2
-; block2:
-;   br %r14
+;   jge label2 ; jg label1
 ; block1:
-;   trap
+;   br %r14
+; block2:
+;   .word 0x0000 # trap=user0
 ; 
 ; Disassembled:
 ; block0: ; offset 0x0
@@ -117,7 +117,7 @@ block0:
 
 ; VCode:
 ; block0:
-;   debugtrap
+;   .word 0x0001 # debugtrap
 ;   br %r14
 ; 
 ; Disassembled:

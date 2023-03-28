@@ -41,32 +41,30 @@
 
 ;; function u0:0:
 ;; block0:
-;;   mov w7, w0
-;;   ldr x8, [x2, #8]
-;;   sub x8, x8, #4
-;;   subs xzr, x7, x8
-;;   b.hi label1 ; b label2
-;; block2:
-;;   ldr x10, [x2]
-;;   str w1, [x10, w0, UXTW]
-;;   b label3
-;; block3:
-;;   ret
+;;   mov w6, w0
+;;   ldr x7, [x2, #8]
+;;   subs xzr, x6, x7
+;;   b.hi label3 ; b label1
 ;; block1:
+;;   ldr x8, [x2]
+;;   str w1, [x8, w0, UXTW]
+;;   b label2
+;; block2:
+;;   ret
+;; block3:
 ;;   udf #0xc11f
 ;;
 ;; function u0:1:
 ;; block0:
-;;   mov w7, w0
-;;   ldr x8, [x1, #8]
-;;   sub x8, x8, #4
-;;   subs xzr, x7, x8
-;;   b.hi label1 ; b label2
-;; block2:
-;;   ldr x10, [x1]
-;;   ldr w0, [x10, w0, UXTW]
-;;   b label3
-;; block3:
-;;   ret
+;;   mov w6, w0
+;;   ldr x7, [x1, #8]
+;;   subs xzr, x6, x7
+;;   b.hi label3 ; b label1
 ;; block1:
+;;   ldr x8, [x1]
+;;   ldr w0, [x8, w0, UXTW]
+;;   b label2
+;; block2:
+;;   ret
+;; block3:
 ;;   udf #0xc11f

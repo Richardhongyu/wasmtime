@@ -370,68 +370,6 @@ impl Inst {
         }
         insts
     }
-
-    /// check if float is unordered.
-    pub(crate) fn lower_float_unordered(
-        tmp: Writable<Reg>,
-        ty: Type,
-        x: Reg,
-        y: Reg,
-        taken: BranchTarget,
-        not_taken: BranchTarget,
-    ) -> SmallInstVec<Inst> {
-        let mut insts = SmallInstVec::new();
-        let class_op = if ty == F32 {
-            FpuOPRR::FclassS
-        } else {
-            FpuOPRR::FclassD
-        };
-        // if x is nan
-        insts.push(Inst::FpuRR {
-            frm: None,
-            alu_op: class_op,
-            rd: tmp,
-            rs: x,
-        });
-        insts.push(Inst::AluRRImm12 {
-            alu_op: AluOPRRI::Andi,
-            rd: tmp,
-            rs: tmp.to_reg(),
-            imm12: Imm12::from_bits(FClassResult::is_nan_bits() as i16),
-        });
-        insts.push(Inst::CondBr {
-            taken,
-            not_taken: BranchTarget::zero(),
-            kind: IntegerCompare {
-                kind: IntCC::NotEqual,
-                rs1: tmp.to_reg(),
-                rs2: zero_reg(),
-            },
-        });
-        // if y is nan.
-        insts.push(Inst::FpuRR {
-            frm: None,
-            alu_op: class_op,
-            rd: tmp,
-            rs: y,
-        });
-        insts.push(Inst::AluRRImm12 {
-            alu_op: AluOPRRI::Andi,
-            rd: tmp,
-            rs: tmp.to_reg(),
-            imm12: Imm12::from_bits(FClassResult::is_nan_bits() as i16),
-        });
-        insts.push(Inst::CondBr {
-            taken,
-            not_taken,
-            kind: IntegerCompare {
-                kind: IntCC::NotEqual,
-                rs1: tmp.to_reg(),
-                rs2: zero_reg(),
-            },
-        });
-        insts
-    }
 }
 
 impl MachInstEmit for Inst {
@@ -679,57 +617,6 @@ impl MachInstEmit for Inst {
                         .into_iter()
                         .for_each(|inst| inst.emit(&[], sink, emit_info, state));
                 }
-            }
-
-            &Inst::ReferenceCheck { rd, op, x } => {
-                let x = allocs.next(x);
-                let rd = allocs.next_writable(rd);
-                let mut insts = SmallInstVec::new();
-                match op {
-                    ReferenceCheckOP::IsNull => {
-                        insts.push(Inst::CondBr {
-                            taken: BranchTarget::ResolvedOffset(Inst::INSTRUCTION_SIZE * 3),
-                            not_taken: BranchTarget::zero(),
-                            kind: IntegerCompare {
-                                kind: IntCC::Equal,
-                                rs1: zero_reg(),
-                                rs2: x,
-                            },
-                        });
-                        // here is false
-                        insts.push(Inst::load_imm12(rd, Imm12::FALSE));
-                        insts.push(Inst::Jal {
-                            dest: BranchTarget::ResolvedOffset(Inst::INSTRUCTION_SIZE * 2),
-                        });
-                        // here is true
-                        insts.push(Inst::load_imm12(rd, Imm12::TRUE));
-                    }
-
-                    ReferenceCheckOP::IsInvalid => {
-                        // todo:: right now just check if it is null
-                        // null is a valid reference??????
-                        insts.push(Inst::CondBr {
-                            taken: BranchTarget::ResolvedOffset(Inst::INSTRUCTION_SIZE * 3),
-                            not_taken: BranchTarget::zero(),
-                            kind: IntegerCompare {
-                                kind: IntCC::Equal,
-                                rs1: zero_reg(),
-                                rs2: x,
-                            },
-                        });
-                        // here is false
-                        insts.push(Inst::load_imm12(rd, Imm12::FALSE));
-                        insts.push(Inst::Jal {
-                            dest: BranchTarget::ResolvedOffset(Inst::INSTRUCTION_SIZE * 2),
-                        });
-                        // here is true
-                        insts.push(Inst::load_imm12(rd, Imm12::TRUE));
-                    }
-                }
-
-                insts
-                    .into_iter()
-                    .for_each(|i| i.emit(&[], sink, emit_info, state));
             }
             &Inst::Args { .. } => {
                 // Nothing: this is a pseudoinstruction that serves
@@ -984,11 +871,13 @@ impl MachInstEmit for Inst {
             &Inst::BrTable {
                 index,
                 tmp1,
+                tmp2,
                 ref targets,
             } => {
                 let index = allocs.next(index);
                 let tmp1 = allocs.next_writable(tmp1);
-                let tmp2 = writable_spilltmp_reg();
+                let tmp2 = allocs.next_writable(tmp2);
+                let ext_index = writable_spilltmp_reg();
 
                 // The default target is passed in as the 0th element of `targets`
                 // separate it here for clarity.
@@ -1001,21 +890,37 @@ impl MachInstEmit for Inst {
                 // that offset. Each jump table entry is a regular auipc+jalr which we emit sequentially.
                 //
                 // Build the following sequence:
+                //
+                // extend_index:
+                //     zext.w  ext_index, index
                 // bounds_check:
                 //     li      tmp, n_labels
-                //     bltu    index, tmp, compute_target
+                //     bltu    ext_index, tmp, compute_target
                 // jump_to_default_block:
                 //     auipc   pc, 0
                 //     jalr    zero, pc, default_block
                 // compute_target:
                 //     auipc   pc, 0
-                //     slli    tmp, index, 3
+                //     slli    tmp, ext_index, 3
                 //     add     pc, pc, tmp
                 //     jalr    zero, pc, 0x10
                 // jump_table:
                 //     ; This repeats for each entry in the jumptable
                 //     auipc   pc, 0
                 //     jalr    zero, pc, block_target
+
+                // Extend the index to 64 bits.
+                //
+                // This prevents us branching on the top 32 bits of the index, which
+                // are undefined.
+                Inst::Extend {
+                    rd: ext_index,
+                    rn: index,
+                    signed: false,
+                    from_bits: 32,
+                    to_bits: 64,
+                }
+                .emit(&[], sink, emit_info, state);
 
                 // Bounds check.
                 //
@@ -1030,7 +935,7 @@ impl MachInstEmit for Inst {
                     not_taken: BranchTarget::zero(),
                     kind: IntegerCompare {
                         kind: IntCC::UnsignedLessThan,
-                        rs1: index,
+                        rs1: ext_index.to_reg(),
                         rs2: tmp2.to_reg(),
                     },
                 }
@@ -1059,7 +964,7 @@ impl MachInstEmit for Inst {
                 Inst::AluRRImm12 {
                     alu_op: AluOPRRI::Slli,
                     rd: tmp2,
-                    rs: index,
+                    rs: ext_index.to_reg(),
                     imm12: Imm12::from_bits(3),
                 }
                 .emit(&[], sink, emit_info, state);
@@ -1308,31 +1213,27 @@ impl MachInstEmit for Inst {
                     amo: AMO::SeqCst,
                 }
                 .emit(&[], sink, emit_info, state);
-                let origin_value = if ty.bits() < 32 {
-                    AtomicOP::extract(t0, offset, dst.to_reg(), ty)
+                if ty.bits() < 32 {
+                    AtomicOP::extract(dst, offset, dst.to_reg(), ty)
                         .iter()
                         .for_each(|i| i.emit(&[], sink, emit_info, state));
-                    t0.to_reg()
                 } else if ty.bits() == 32 {
                     Inst::Extend {
-                        rd: t0,
+                        rd: dst,
                         rn: dst.to_reg(),
                         signed: false,
                         from_bits: 32,
                         to_bits: 64,
                     }
                     .emit(&[], sink, emit_info, state);
-                    t0.to_reg()
-                } else {
-                    dst.to_reg()
-                };
+                }
                 Inst::CondBr {
                     taken: BranchTarget::Label(fail_label),
                     not_taken: BranchTarget::zero(),
                     kind: IntegerCompare {
                         kind: IntCC::NotEqual,
                         rs1: e,
-                        rs2: origin_value,
+                        rs2: dst.to_reg(),
                     },
                 }
                 .emit(&[], sink, emit_info, state);
@@ -1408,7 +1309,7 @@ impl MachInstEmit for Inst {
                     | crate::ir::AtomicRmwOp::And
                     | crate::ir::AtomicRmwOp::Or
                     | crate::ir::AtomicRmwOp::Xor => {
-                        AtomicOP::extract(t0, offset, dst.to_reg(), ty)
+                        AtomicOP::extract(dst, offset, dst.to_reg(), ty)
                             .iter()
                             .for_each(|i| i.emit(&[], sink, emit_info, state));
                         Inst::AluRRR {
@@ -1421,7 +1322,7 @@ impl MachInstEmit for Inst {
                                 _ => unreachable!(),
                             },
                             rd: t0,
-                            rs1: t0.to_reg(),
+                            rs1: dst.to_reg(),
                             rs2: x,
                         }
                         .emit(&[], sink, emit_info, state);
@@ -1445,19 +1346,16 @@ impl MachInstEmit for Inst {
                         spilltmp_reg2()
                     }
                     crate::ir::AtomicRmwOp::Nand => {
-                        let x2 = if ty.bits() < 32 {
-                            AtomicOP::extract(t0, offset, dst.to_reg(), ty)
+                        if ty.bits() < 32 {
+                            AtomicOP::extract(dst, offset, dst.to_reg(), ty)
                                 .iter()
                                 .for_each(|i| i.emit(&[], sink, emit_info, state));
-                            t0.to_reg()
-                        } else {
-                            dst.to_reg()
-                        };
+                        }
                         Inst::AluRRR {
                             alu_op: AluOPRRR::And,
                             rd: t0,
                             rs1: x,
-                            rs2: x2,
+                            rs2: dst.to_reg(),
                         }
                         .emit(&[], sink, emit_info, state);
                         Inst::construct_bit_not(t0, t0.to_reg()).emit(&[], sink, emit_info, state);
@@ -1489,12 +1387,13 @@ impl MachInstEmit for Inst {
                     | crate::ir::AtomicRmwOp::Umax
                     | crate::ir::AtomicRmwOp::Smin
                     | crate::ir::AtomicRmwOp::Smax => {
+                        let label_select_dst = sink.get_label();
                         let label_select_done = sink.get_label();
                         if op == crate::ir::AtomicRmwOp::Umin || op == crate::ir::AtomicRmwOp::Umax
                         {
-                            AtomicOP::extract(t0, offset, dst.to_reg(), ty)
+                            AtomicOP::extract(dst, offset, dst.to_reg(), ty)
                         } else {
-                            AtomicOP::extract_sext(t0, offset, dst.to_reg(), ty)
+                            AtomicOP::extract_sext(dst, offset, dst.to_reg(), ty)
                         }
                         .iter()
                         .for_each(|i| i.emit(&[], sink, emit_info, state));
@@ -1506,9 +1405,9 @@ impl MachInstEmit for Inst {
                                 crate::ir::AtomicRmwOp::Smax => IntCC::SignedGreaterThan,
                                 _ => unreachable!(),
                             },
-                            ValueRegs::one(t0.to_reg()),
+                            ValueRegs::one(dst.to_reg()),
                             ValueRegs::one(x),
-                            BranchTarget::Label(label_select_done),
+                            BranchTarget::Label(label_select_dst),
                             BranchTarget::zero(),
                             ty,
                         )
@@ -1516,6 +1415,12 @@ impl MachInstEmit for Inst {
                         .for_each(|i| i.emit(&[], sink, emit_info, state));
                         // here we select x.
                         Inst::gen_move(t0, x, I64).emit(&[], sink, emit_info, state);
+                        Inst::Jal {
+                            dest: BranchTarget::Label(label_select_done),
+                        }
+                        .emit(&[], sink, emit_info, state);
+                        sink.bind_label(label_select_dst);
+                        Inst::gen_move(t0, dst.to_reg(), I64).emit(&[], sink, emit_info, state);
                         sink.bind_label(label_select_done);
                         Inst::Atomic {
                             op: AtomicOP::load_op(ty),
@@ -1537,6 +1442,9 @@ impl MachInstEmit for Inst {
                         spilltmp_reg2()
                     }
                     crate::ir::AtomicRmwOp::Xchg => {
+                        AtomicOP::extract(dst, offset, dst.to_reg(), ty)
+                            .iter()
+                            .for_each(|i| i.emit(&[], sink, emit_info, state));
                         Inst::Atomic {
                             op: AtomicOP::load_op(ty),
                             rd: writable_spilltmp_reg2(),
@@ -1784,23 +1692,23 @@ impl MachInstEmit for Inst {
                 if out_type.bits() < 32 && is_signed {
                     // load value part mask.
                     Inst::load_constant_u32(
-                        tmp,
+                        writable_spilltmp_reg(),
                         if 16 == out_type.bits() {
                             (u16::MAX >> 1) as u64
                         } else {
                             // I8
                             (u8::MAX >> 1) as u64
                         },
-                        &mut |_| writable_spilltmp_reg(),
+                        &mut |_| writable_spilltmp_reg2(),
                     )
                     .into_iter()
                     .for_each(|x| x.emit(&[], sink, emit_info, state));
                     // keep value part.
                     Inst::AluRRR {
                         alu_op: AluOPRRR::And,
-                        rd: tmp,
+                        rd: writable_spilltmp_reg(),
                         rs1: rd.to_reg(),
-                        rs2: tmp.to_reg(),
+                        rs2: spilltmp_reg(),
                     }
                     .emit(&[], sink, emit_info, state);
                     // extact sign bit.
@@ -1828,7 +1736,7 @@ impl MachInstEmit for Inst {
                         alu_op: AluOPRRR::Or,
                         rd: rd,
                         rs1: rd.to_reg(),
-                        rs2: tmp.to_reg(),
+                        rs2: spilltmp_reg(),
                     }
                     .emit(&[], sink, emit_info, state);
                 }
@@ -1938,9 +1846,7 @@ impl MachInstEmit for Inst {
                 if let Some(s) = state.take_stack_map() {
                     sink.add_stack_map(StackMapExtent::UpcomingBytes(4), s);
                 }
-                // https://github.com/riscv/riscv-isa-manual/issues/850
-                // all zero will cause invalid opcode.
-                sink.put4(0);
+                sink.put_data(Inst::TRAP_OPCODE);
             }
             &Inst::SelectIf {
                 if_spectre_guard: _if_spectre_guard, // _if_spectre_guard not use because it is used to not be removed by optimization pass and some other staff.

@@ -248,7 +248,6 @@ fn test_riscv64_binemit() {
         0x28755593,
     ));
 
-    //
     insns.push(TestUnit::new(
         Inst::AluRRR {
             alu_op: AluOPRRR::Adduw,
@@ -256,8 +255,19 @@ fn test_riscv64_binemit() {
             rs1: a0(),
             rs2: zero_reg(),
         },
-        "add.uw a1,a0,zero",
+        "zext.w a1,a0",
         0x80505bb,
+    ));
+
+    insns.push(TestUnit::new(
+        Inst::AluRRR {
+            alu_op: AluOPRRR::Adduw,
+            rd: writable_a1(),
+            rs1: a0(),
+            rs2: a1(),
+        },
+        "add.uw a1,a0,a1",
+        0x08b505bb,
     ));
 
     insns.push(TestUnit::new(
@@ -512,6 +522,38 @@ fn test_riscv64_binemit() {
         },
         "xnor a1,a0,zero",
         0x400545b3,
+    ));
+
+    // Zbkb
+    insns.push(TestUnit::new(
+        Inst::AluRRR {
+            alu_op: AluOPRRR::Pack,
+            rd: writable_a1(),
+            rs1: a0(),
+            rs2: zero_reg(),
+        },
+        "pack a1,a0,zero",
+        0x080545b3,
+    ));
+    insns.push(TestUnit::new(
+        Inst::AluRRR {
+            alu_op: AluOPRRR::Packw,
+            rd: writable_a1(),
+            rs1: a0(),
+            rs2: zero_reg(),
+        },
+        "packw a1,a0,zero",
+        0x080545bb,
+    ));
+    insns.push(TestUnit::new(
+        Inst::AluRRR {
+            alu_op: AluOPRRR::Packh,
+            rd: writable_a1(),
+            rs1: a0(),
+            rs2: zero_reg(),
+        },
+        "packh a1,a0,zero",
+        0x080575b3,
     ));
 
     //
@@ -2063,7 +2105,7 @@ fn make_test_flags() -> (settings::Flags, super::super::riscv_settings::Flags) {
     let b = settings::builder();
     let flags = settings::Flags::new(b.clone());
     let b2 = super::super::riscv_settings::builder();
-    let isa_flags = super::super::riscv_settings::Flags::new(&flags, b2);
+    let isa_flags = super::super::riscv_settings::Flags::new(&flags, &b2);
     (flags, isa_flags)
 }
 
