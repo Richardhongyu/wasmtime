@@ -1293,6 +1293,7 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
 
 use rdma_sys::*;
 use std::{env, process::exit, ptr::null_mut};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[tokio::main]
 async fn new_test() {
@@ -1312,7 +1313,12 @@ async fn new_test() {
     tokio::time::sleep(Duration::new(1, 0)).await;
     // run();
 
+    let now1 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
+    println!("the current time is {:?}", now1);
     let ret = run(ip, port);
+    let now2 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
+    println!("the end time is {:?}", now2);
+    println!("the between time is {:?}", now2 - now1);
 
     if ret != 0 {
         println!(
@@ -1326,7 +1332,7 @@ async fn new_test() {
             );
         }
     }
-    println!("rdma_client: end");
+    println!("rdma_client: end\n");
 }
 
 fn server_runs() {

@@ -59,3 +59,17 @@ the output is
 [Debug] you are using wasi-rdma interface
 Hello World!
 ```
+
+## todolist
+
+1. fix the `TODO:` in the code.  
+    - [ ] error handler  
+    - [ ] send flags  
+2. change the hardcode number
+    - [ ] compare the `max_inline_data` with 32/16
+    - [ ] change the length of `rdma_post_send` and `rdma_post_recv`
+3. `test_server_client.sh`
+    - [ ] adjust the buffer length `send_msg` and `recv_msg` in the bash
+    - [ ] find the ip address of nic and pass it to the client and server
+4. test the overhead(the specific experiments can be seen in this [doc](https://docs.google.com/presentation/d/1Qg7Ns0HlSDUIdAkiS5_w7WXc56n-kcxijS1lM3qazKI/edit?usp=sharing))
+    - [ ] use wasi-socket to write/read a large file to another wasm

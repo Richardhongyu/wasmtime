@@ -3,8 +3,9 @@
 #![allow(unused_variables)]
 
 use wasi_rdma;
-static SERVER: &str = "192.168.31.235\0";
-static PORT: &str = "7472\0";
+static SERVER: &str = "192.168.217.128\0";
+static PORT: &str = "7471\0";
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     println!("Hello, world!");
@@ -14,7 +15,20 @@ fn main() {
     // sleep for 1 second
     // std::thread::sleep(Duration::new(1, 0));
     // let _ret = client_runs(SERVER, PORT);
+    // print the current time
+    let now1 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
+    println!("the current time is {:?}", now1);
     let _ret = server_runs(SERVER, PORT);
+    // print the end time
+    let now2 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
+    println!("the end time is {:?}", now2);
+    println!("the between server time is {:?}", now2 - now1);
     println!("End of rdma_test");
 }
 
@@ -58,11 +72,11 @@ fn server_runs(_ip: &str, _port: &str) -> i32 {
 
 // fn client_run() -> i32 {
 //     let mut send_flags = 0_u32;
-//     let mut send_msg = vec![1_u8; 16];
-//     let mut recv_msg = vec![0_u8; 16];
+//     let mut send_msg = vec![1_u8; 32];
+//     let mut recv_msg = vec![0_u8; 32];
 
 //     // TODO: add the send_flags support
-//     // if cap.max_inline_data >= 16 {
+//     // if cap.max_inline_data >= 32 {
 //     //     send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
 //     // } else {
 //     //     println!("rdma_client: device doesn't support IBV_SEND_INLINE, using sge sends");
@@ -70,18 +84,18 @@ fn server_runs(_ip: &str, _port: &str) -> i32 {
 
 //     let rdma = unsafe { wasi_rdma::rdma_init(SERVER, PORT, rdma_info, cap, 0).unwrap() };
 
-//     let mr = unsafe { wasi_rdma::rdma_reg_msgs(rdma, recv_msg.as_mut_ptr().cast(), 16).unwrap() };
+//     let mr = unsafe { wasi_rdma::rdma_reg_msgs(rdma, recv_msg.as_mut_ptr().cast(), 32).unwrap() };
 
 //     let send_mr =
-//         unsafe { wasi_rdma::rdma_reg_msgs(rdma, send_msg.as_mut_ptr().cast(), 16).unwrap() };
+//         unsafe { wasi_rdma::rdma_reg_msgs(rdma, send_msg.as_mut_ptr().cast(), 32).unwrap() };
 
 //     let mut ret =
-//         unsafe { wasi_rdma::rdma_post_recv(rdma, recv_msg.as_mut_ptr().cast(), 16, mr).unwrap() };
+//         unsafe { wasi_rdma::rdma_post_recv(rdma, recv_msg.as_mut_ptr().cast(), 32, mr).unwrap() };
 
 //     ret = unsafe { wasi_rdma::rdma_connect(rdma).unwrap() };
 
 //     ret = unsafe {
-//         wasi_rdma::rdma_post_send(rdma, send_msg.as_mut_ptr().cast(), 16, send_mr, send_flags)
+//         wasi_rdma::rdma_post_send(rdma, send_msg.as_mut_ptr().cast(), 32, send_mr, send_flags)
 //             .unwrap()
 //     };
 
@@ -116,8 +130,8 @@ fn server_runs(_ip: &str, _port: &str) -> i32 {
 
 fn server_run() -> i32 {
     let mut send_flags = 0_u32;
-    let mut send_msg = vec![1_u8; 16];
-    let mut recv_msg = vec![0_u8; 16];
+    let mut send_msg = vec![1_u8; 32];
+    let mut recv_msg = vec![0_u8; 32];
 
     let mut rdma_info = wasi_rdma::RdmaAddrinfoStruct::default();
     let cap = wasi_rdma::IbvQpCap::default();
@@ -132,13 +146,13 @@ fn server_run() -> i32 {
     send_flags = unsafe { wasi_rdma::rdma_send_flags(rdma).unwrap() };
     println!("rdma_server: send_flags: {:?}", send_flags);
 
-    let mr = unsafe { wasi_rdma::rdma_reg_msgs(rdma, recv_msg.as_mut_ptr().cast(), 16).unwrap() };
+    let mr = unsafe { wasi_rdma::rdma_reg_msgs(rdma, recv_msg.as_mut_ptr().cast(), 32).unwrap() };
     let mut send_mr = 0;
     if (send_flags & wasi_rdma::rdma_ibv_send_flags::IBV_SEND_INLINE) == 0 {
         send_mr =
-            unsafe { wasi_rdma::rdma_reg_msgs(rdma, send_msg.as_mut_ptr().cast(), 16).unwrap() };
+            unsafe { wasi_rdma::rdma_reg_msgs(rdma, send_msg.as_mut_ptr().cast(), 32).unwrap() };
     }
-    unsafe { wasi_rdma::rdma_post_recv(rdma, recv_msg.as_mut_ptr().cast(), 16, mr).unwrap() };
+    unsafe { wasi_rdma::rdma_post_recv(rdma, recv_msg.as_mut_ptr().cast(), 32, mr).unwrap() };
 
     unsafe { wasi_rdma::rdma_accept(rdma).unwrap() };
     // TODO: fix the error handle
@@ -156,7 +170,7 @@ fn server_run() -> i32 {
     let wc = unsafe { wasi_rdma::rdma_get_recv_comp(rdma, 0).unwrap() };
     // }
     println!("rdma_server: recv ret : {:?}", wc);
-    println!("rdma_client: recv msg : {:?}", recv_msg);
+    println!("rdma_server: recv msg : {:?}", recv_msg);
     // TODO: fix the error handle
     // if ret < 0 {
     //     println!("rdma_get_recv_comp");
@@ -165,7 +179,7 @@ fn server_run() -> i32 {
     // }
 
     unsafe {
-        wasi_rdma::rdma_post_send(rdma, send_msg.as_mut_ptr().cast(), 16, send_mr, send_flags)
+        wasi_rdma::rdma_post_send(rdma, send_msg.as_mut_ptr().cast(), 32, send_mr, send_flags)
             .unwrap()
     };
     unsafe { wasi_rdma::rdma_get_send_comp(rdma, wc).unwrap() };
