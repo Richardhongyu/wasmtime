@@ -2,7 +2,9 @@
   (enum (@witx tag u16)
     $success
     $runtime_error
-    $io_error
+    $handle_not_found
+    $invalid_argument
+    $handle_no_free_keys
   )
 )
 

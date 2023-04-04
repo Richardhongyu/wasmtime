@@ -6,7 +6,7 @@ use std::sync::Arc;
 use wiggle::GuestPtr;
 
 use crate::guest_types::IbvWc;
-use crate::guest_types::RdmaError::RuntimeError;
+use crate::guest_types::RdmaError::*;
 use crate::guest_types::{IbvMr, IbvQpCap, Rdma, RdmaAddrinfoStruct, RdmaError};
 use crate::rdma::{RdmaIbvWc, RdmaMr, RDMA};
 use crate::table;
@@ -46,8 +46,8 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         // hint.ai_port_space = rdma_port_space::RDMA_PS_TCP as c_int;
         // Safety: ffi
         // println!("I'm in ");
-        let node = node.as_str()?.ok_or(RdmaError::RuntimeError)?;
-        let service = service.as_str()?.ok_or(RdmaError::RuntimeError)?;
+        let node = node.as_str()?.ok_or(RdmaError::InvalidArgument)?;
+        let service = service.as_str()?.ok_or(RdmaError::InvalidArgument)?;
         // println!("I'm in ");
         let mut ret = unsafe {
             rdma_getaddrinfo(
@@ -60,6 +60,8 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         // println!("I'm in ");
         // println!("I'm in {}", ret);
         if ret != 0_i32 {
+            //TODO:Print Errors or retrun errno?
+            println!("rdma_getaddrinfo retrun {:?}", std::io::Error::last_os_error());
             return Err(RdmaError::RuntimeError);
         }
         let mut id: *mut rdma_cm_id = null_mut();
@@ -85,6 +87,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             unsafe {
                 rdma_freeaddrinfo(info);
             }
+            println!("rdma_create_ep retrun {:?}", std::io::Error::last_os_error());
             // println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
@@ -102,7 +105,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
                 unsafe {
                     rdma_destroy_ep(id);
                 }
-
+                println!("rdma_listen retrun {:?}", std::io::Error::last_os_error());
                 // println!("{:?}", std::io::Error::last_os_error());
                 return Err(RuntimeError);
             }
@@ -113,7 +116,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
                 unsafe {
                     rdma_destroy_ep(id);
                 }
-
+                println!("rdma_get_request retrun {:?}", std::io::Error::last_os_error());
                 // println!("{:?}", std::io::Error::last_os_error());
                 return Err(RuntimeError);
             }
@@ -123,6 +126,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
                 if init_attr.cap.max_inline_data >= 32 {
                     rdma.send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
                 } else {
+
                     // println!("rdma_client: device doesn't support IBV_SEND_INLINE, using sge sends");
                 }    
             rdma.id = id;
@@ -136,12 +140,12 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         Ok(self
             .table
             .push(Arc::new(rdma))
-            .map_err(|_| RuntimeError)?
+            .map_err(|_| HandleNoFreeKeys)?
             .into())
     }
 
     fn rdma_connect(&mut self, rdma: Rdma) -> Result<(), RdmaError> {
-        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| HandleNotFound)?;
         if rdma.is_server {
             // println!("RDMA Server ->rdma_connect ?");
         }
@@ -152,36 +156,37 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             unsafe {
                 rdma_disconnect(id);
             }
-            // println!("{:?}", std::io::Error::last_os_error());
+            println!("rdma_connect retrun {:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         Ok(())
     }
 
     fn rdma_disconnect(&mut self, rdma: Rdma) -> Result<(), RdmaError> {
-        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| HandleNotFound)?;
 
         let id = rdma.id()?;
         unsafe { rdma_disconnect(id) };
         Ok(())
     }
     fn rdma_accept(&mut self, rdma: Rdma) -> Result<(), RdmaError> {
-        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| HandleNotFound)?;
         let id = rdma.id()?;
         let ret = unsafe { rdma_accept(id, null_mut()) };
         if ret != 0 {
+            println!("rdma_accept retrun {:?}", std::io::Error::last_os_error());
             // println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         Ok(())
     }
     fn rdma_send_flags(&mut self, rdma: Rdma) -> Result<u32, RdmaError> {
-        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| HandleNotFound)?;
         Ok(rdma.send_flags)
     }
 
     fn rdma_get_send_comp(&mut self, rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
-        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| HandleNotFound)?;
         // println!("error is here");
         let id = rdma.id()?;
         //if ibv_wc is NULL,set to 0;
@@ -204,6 +209,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
 
         // println!("error is here ret is {}", ret);
         if ret <0 {
+            println!("rdma_get_send_comp retrun {:?}", std::io::Error::last_os_error());
             // println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }else if ret ==0 {
@@ -212,6 +218,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             }
             // println!("rdma_get_send_comp is {}", ret);
             if ret <0 {
+                println!("rdma_get_send_comp retrun {:?}", std::io::Error::last_os_error());
                 // println!("{:?}", std::io::Error::last_os_error());
                 return Err(RuntimeError);
             }
@@ -222,7 +229,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             Ok(self
                 .table
                 .push(Arc::new(RdmaIbvWc(ibv_wc_)))
-                .map_err(|_| RuntimeError)?
+                .map_err(|_| HandleNoFreeKeys)?
                 .into())
         } else {
             // println!("error is here");
@@ -231,7 +238,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
     }
 
     fn rdma_get_recv_comp(&mut self, rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
-        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| HandleNotFound)?;
         let id = rdma.id()?;
         //if ibv_wc is NULL,set to 0;
         let ibv_wc_ = if wc == 0.into() {
@@ -239,11 +246,12 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         } else {
             self.table
                 .get_mut::<RdmaIbvWc>(wc.into())
-                .map_err(|_| RuntimeError)?
+                .map_err(|_| HandleNotFound)?
                 .0.clone()
         };
         let mut ret = unsafe { rdma_get_recv_comp(id, *ibv_wc_) };
         if ret <0 {
+            println!("rdma_get_recv_comp retrun{} error {:?}",ret, std::io::Error::last_os_error());
             // println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }else if ret ==0 {
@@ -252,6 +260,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             }
             // println!("rdma_get_recv_comp is {}", ret);
             if ret <0 {
+                println!("rdma_get_recv_comp retrun{} error {:?}",ret, std::io::Error::last_os_error());
                 // println!("{:?}", std::io::Error::last_os_error());
                 return Err(RuntimeError);
             }
@@ -260,7 +269,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             Ok(self
                 .table
                 .push(Arc::new(RdmaIbvWc(ibv_wc_)))
-                .map_err(|_| RuntimeError)?
+                .map_err(|_| HandleNoFreeKeys)?
                 .into())
         } else {
             Ok(wc)
@@ -275,29 +284,32 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
     ) -> Result<IbvMr, RdmaError> {
         // TODO: Check Memory
         if addr.is_shared_memory() {
-            // println!("No Support for Shared Memory!");
+            println!("No Support for Shared Memory!");
             // println!("{:?}", std::io::Error::last_os_error());
-            return Err(RuntimeError);
+            return Err(InvalidArgument);
         }
         let mut addr = addr
             .as_array(size)
             .as_slice_mut()
-            .map_err(|_| RuntimeError)?
-            .ok_or_else(|| RuntimeError)?;
+            // Invalid Slice
+            .map_err(|_| InvalidArgument)?
+            //Shared Memory (Already Checked)
+            .ok_or_else(|| InvalidArgument)?;
 
-        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| RuntimeError)?;
+        let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| HandleNotFound)?;
 
         let id = rdma.id()?;
         let mr = unsafe { rdma_reg_msgs(id, addr.as_mut_ptr().cast(), size as usize) };
         if mr.is_null() {
             unsafe { rdma_dereg_mr(mr) };
+            println!("rdma_reg_msgs error {:?}", std::io::Error::last_os_error());
             // println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
         Ok(self
             .table
             .push(Arc::new(RdmaMr(mr)))
-            .map_err(|_| RuntimeError)?
+            .map_err(|_| HandleNoFreeKeys)?
             .into())
     }
 
@@ -305,7 +317,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let mr = self
             .table
             .get_mut::<RdmaMr>(ibv_mr.into())
-            .map_err(|_| RuntimeError);
+            .map_err(|_| HandleNotFound);
         if let Ok(inner_mr) = mr {
             unsafe { rdma_dereg_mr(inner_mr.0) };
         }
@@ -322,19 +334,19 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let rdma: &mut RDMA = self
             .table
             .get_mut::<RDMA>(rdma.into())
-            .map_err(|_| RuntimeError)?;
+            .map_err(|_| HandleNotFound)?;
         rdma.send_flags=flags;
         let id = rdma.id()?;
         // let send_msg = unsafe { addr.mem().base().as_ptr().offset(addr.offset() as isize) };
         let mut send_msg = addr
         .as_array(_size)
         .as_slice_mut()
-        .map_err(|_| RuntimeError)?
-        .ok_or_else(|| RuntimeError)?;
+        .map_err(|_| InvalidArgument)?
+        .ok_or_else(|| InvalidArgument)?;
         let send_mr = if Into::<u32>::into(send_mr)>0{ self
             .table
             .get_mut::<RdmaMr>(send_mr.into())
-            .map_err(|_| RuntimeError)?
+            .map_err(|_| HandleNotFound)?
             .0
         }else{
             null_mut()
@@ -355,6 +367,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             unsafe {
                 rdma_disconnect(id);
             }
+            println!("rdma_post_send retrun {} error {:?}",ret,std::io::Error::last_os_error());
             // println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
@@ -371,18 +384,18 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let rdma = self
             .table
             .get_mut::<RDMA>(rdma.into())
-            .map_err(|_| RuntimeError)?;
+            .map_err(|_| HandleNotFound)?;
         let id = rdma.id()?;
         let send_flags = rdma.send_flags;
         let mut recv_msg = addr
         .as_array(_size)
         .as_slice_mut()
-        .map_err(|_| RuntimeError)?
-        .ok_or_else(|| RuntimeError)?;
+        .map_err(|_| InvalidArgument)?
+        .ok_or_else(|| InvalidArgument)?;
         let mr = self
             .table
             .get_mut::<RdmaMr>(recv_mr.into())
-            .map_err(|_| RuntimeError)?
+            .map_err(|_| HandleNotFound)?
             .0;
         let ret = unsafe { rdma_post_recv(id, null_mut(), recv_msg.as_mut_ptr().cast(), 32, mr) };
         if ret != 0 {
@@ -390,6 +403,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) as u32 == 0 {
                 unsafe { rdma_dereg_mr(mr) };
             }
+            println!("rdma_post_recv retrun {} error {:?}",ret,std::io::Error::last_os_error());
             // println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
@@ -400,7 +414,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let rdma: &mut RDMA = self
             .table
             .get_mut::<RDMA>(rdma.into())
-            .map_err(|_| RuntimeError)?;
+            .map_err(|_| HandleNotFound)?;
         let mut qp_attr = unsafe { std::mem::zeroed::<ibv_qp_attr>() };
         let id = rdma.id()?;
         // let mask:c_int = if ibv_qp_attrmask>0{ibv_qp_attr_mask(ibv_qp_attrmask).0.try_into().unwrap_or(ibv_qp_attr_mask::IBV_QP_CAP.0.try_into().unwrap())}else {ibv_qp_attr_mask::IBV_QP_CAP.0.try_into().unwrap()};
@@ -416,6 +430,7 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             unsafe {
                 rdma_destroy_ep(id);
             }
+            println!("ibv_query_qp retrun {} error {:?}",ret,std::io::Error::last_os_error());
             // println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
