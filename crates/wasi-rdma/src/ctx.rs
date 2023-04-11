@@ -12,6 +12,8 @@ use crate::rdma::{RdmaIbvWc, RdmaMr, RDMA};
 use crate::table;
 use crate::witx::wasi_ephemeral_rdma::WasiEphemeralRdma;
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 pub struct WasiRdmaCtx {
     table: table::Table,
 }
@@ -33,6 +35,12 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         cap: &IbvQpCap,
         is_server: u8,
     ) -> Result<Rdma, RdmaError> {
+        let now0 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
+        
+
         // println!("I'm in ");
         let mut hint: rdma_addrinfo = hints.into();
         // let mut hint = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
@@ -49,6 +57,22 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         let node = node.as_str()?.ok_or(RdmaError::RuntimeError)?;
         let service = service.as_str()?.ok_or(RdmaError::RuntimeError)?;
         // println!("I'm in ");
+        let mut id: *mut rdma_cm_id = null_mut();
+        let mut init_attr = unsafe { Box::new(std::mem::zeroed::<ibv_qp_init_attr>()) };
+        init_attr.cap = cap.into();
+        // init_attr.cap.max_send_wr = 1;
+        // init_attr.cap.max_recv_wr = 1;
+        // init_attr.cap.max_send_sge = 1;
+        // init_attr.cap.max_recv_sge = 1;
+        // init_attr.cap.max_inline_data = 16;
+        //todo: qp_context?
+        if is_server == 0 {
+            init_attr.qp_context = id.cast();
+        }
+        init_attr.sq_sig_all = 1;
+        let mut rdma = RDMA::default();
+
+        let now1 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         let mut ret = unsafe {
             rdma_getaddrinfo(
                 node.as_ptr().cast(),
@@ -62,21 +86,10 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         if ret != 0_i32 {
             return Err(RdmaError::RuntimeError);
         }
-        let mut id: *mut rdma_cm_id = null_mut();
+        let now2 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         // Safety: ffi
         // println!("I'm in ");
-        let mut init_attr = unsafe { Box::new(std::mem::zeroed::<ibv_qp_init_attr>()) };
-        init_attr.cap = cap.into();
-        // init_attr.cap.max_send_wr = 1;
-        // init_attr.cap.max_recv_wr = 1;
-        // init_attr.cap.max_send_sge = 1;
-        // init_attr.cap.max_recv_sge = 1;
-        // init_attr.cap.max_inline_data = 16;
-        //todo: qp_context?
-        if is_server == 0 {
-            init_attr.qp_context = id.cast();
-        }
-        init_attr.sq_sig_all = 1;
+        
         ret = unsafe { rdma_create_ep(&mut id, info, null_mut(), &mut *init_attr) };
 
         // println!("I'm in {}", ret);
@@ -91,11 +104,13 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
         // println!("I'm in ");
         // Safety: id was initialized by `rdma_create_ep`
         // println!("id:{:?}", id);
-        let mut rdma = RDMA::default();
+        let now3 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
+        let mut now4 = 0;
         // println!("I'm in ");
         if is_server != 0 {
             rdma.is_server = true;
             ret = unsafe { rdma_listen(id, 0) };
+            now4 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
             rdma.listen_id = id;
             // println!("I'm in listen {} ", ret);
             if ret != 0 {
@@ -127,12 +142,19 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
                 }    
             rdma.id = id;
         }
+        let now5 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
         // println!("I'm in listen ");
         rdma.init_attr = init_attr;
+
 
         // Safety: ffi
 
         // println!("byebye");
+        println!("client: parameters_init: {}", now1 - now0);
+        println!("client: rdma_getaddrinfo: {}", now2 - now1);
+        println!("client: rdma_create_ep: {}", now3 - now2);
+        println!("client: rdma_listen: {}", now4 - now3);
+        println!("client: rdma_get_request: {}", now5 - now4);
         Ok(self
             .table
             .push(Arc::new(rdma))

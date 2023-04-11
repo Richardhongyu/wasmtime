@@ -72,6 +72,7 @@ fn client_runs(_ip: &str, _port: &str) -> i32 {
 fn client_run() -> i32 {
     let mut send_flags = 0_u32;
     let mut send_msg = vec![1_u8; 32];
+    // let mut send_msg = vec![-352.99940215, -386.4425458,  -344.37345795, -352.14673138, -267.51065741,  -237.69258675, -247.81826822, -296.35302538, -281.731428,   -128.98406824,  -351.57316838, -381.89259554, -345.03346383, -351.00782729, -221.11034165,  -225.77423272, -260.60158467, -304.48111271, -189.37395986,  330.8253922,  -326.48771875,   89.74117318, -313.59944558, -335.93837605,  214.56267484,   -91.18202693,  -47.04386168, -167.56590918,  361.92984002,   44.14646652,   403.34483529];
     let mut recv_msg = vec![0_u8; 32];
 
     let mut rdma_info = wasi_rdma::RdmaAddrinfoStruct::default();
@@ -85,11 +86,27 @@ fn client_run() -> i32 {
     //     // println!("rdma_client: device doesn't support IBV_SEND_INLINE, using sge sends");
     // }
 
+    let now1 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
     let rdma = unsafe { wasi_rdma::rdma_init(SERVER, PORT, rdma_info, cap, 0).unwrap() };
+    let now2 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
 
     // println!("client");
     let mr = unsafe { wasi_rdma::rdma_reg_msgs(rdma, recv_msg.as_mut_ptr().cast(), 32).unwrap() };
+    let now3 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
     send_flags = unsafe { wasi_rdma::rdma_send_flags(rdma).unwrap() };
+    let now4 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
     // println!("client");
     let send_mr = if (send_flags & wasi_rdma::rdma_ibv_send_flags::IBV_SEND_INLINE) as u32 == 0 {
         println!("client send_flags:{}",send_flags);
@@ -97,22 +114,38 @@ fn client_run() -> i32 {
     } else {
         0
     };
+    let now5 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
 
     // println!("client");
 
     unsafe { wasi_rdma::rdma_post_recv(rdma, recv_msg.as_mut_ptr().cast(), 32, mr).unwrap() };
+    let now6 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
 
     // println!("client");
     unsafe { wasi_rdma::rdma_connect(rdma).unwrap() };
-
+    let now7 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros(); 
     // println!("client");
     unsafe {
         wasi_rdma::rdma_post_send(rdma, send_msg.as_mut_ptr().cast(), 32, send_mr, send_flags)
-            .unwrap()
+            .unwrap();
     };
+    let now8 = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .unwrap()
+    .as_micros();
 
     // println!("client");
     let wc = unsafe { wasi_rdma::rdma_get_send_comp(rdma, 0).unwrap() };
+    let now9 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
     let ret = 0;
     // println!("client end");
     // while ret == 0 {
@@ -131,6 +164,20 @@ fn client_run() -> i32 {
 
     // while ret == 0 {
     unsafe { wasi_rdma::rdma_get_recv_comp(rdma, wc).unwrap() };
+    let now10 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
+    println!("client: rdma_get_recv_comp: {}", now10 - now9);
+    println!("client: rdma_get_send_comp: {}", now9 - now8);
+    println!("client: rdma_post_send: {}", now8 - now7);
+    println!("client: rdma_connect: {}", now7 - now6);
+    println!("client: rdma_post_recv: {}", now6 - now5);
+    println!("client: rdma_reg_msgs: {}", now5 - now4);
+    println!("client: rdma_send_flags: {}", now4 - now3);
+    println!("client: rdma_reg_msgs: {}", now3 - now2);
+    println!("client: rdma_init: {}", now2 - now1);
+
     // }
     // println!("rdma_client: recv msg : {:?}", recv_msg);
     // TODO: fix the error handle

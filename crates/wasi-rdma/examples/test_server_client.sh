@@ -1,29 +1,91 @@
 #!/bin/bash
 
-total=0
+count=200
+total_bt=0
+total_1=0
+total_2=0
+total_3=0
+total_4=0
+total_5=0
+total_6=0
+total_7=0
+total_8=0
+total_9=0
+total_10=0
+total_11=0
+total_12=0
+total_13=0
+total_14=0
 
-# 循环200次
-for i in {1..200}; do
-    # 运行第一个程序，并将其输出存储到文件中
-    ../../../target/debug/wasmtime --wasi-modules experimental-wasi-rdma rdma_test_server/target/wasm32-wasi/release/rdma_test.wasm > /dev/null 2>&1 &
-
-    # 等待1秒钟
-    sleep 1   
-
-    # 运行第二个程序，并将其输出存储到变量中
-    output2=$(../../../target/debug/wasmtime --wasi-modules experimental-wasi-rdma rdma_test/target/wasm32-wasi/release/rdma_test.wasm)
-
-    # 在第二个程序的输出中查找以“the between time is”开头的行
-    between_time=$(echo "$output2" | grep "^the between time is")
-
-    # 如果找到了这样的行，则从中提取数字并将其添加到总和中
-    if [ -n "$between_time" ]; then
-        time_value=$(echo "$between_time" | awk '{print $5}')
-        total=$((total + time_value))
-    fi
+for ((i=1;i<=count;i++))
+do
+    ../../../target/release/wasmtime --wasi-modules experimental-wasi-rdma rdma_test_server/target/wasm32-wasi/release/rdma_test.wasm > /dev/null 2>&1 &
+    sleep 1
+    output2=$(../../../target/release/wasmtime --wasi-modules experimental-wasi-rdma rdma_test/target/wasm32-wasi/release/rdma_test.wasm)
+    bt=$(echo "$output2" | grep "the between time is" | awk '{print $5}')
+    t1=$(echo "$output2" | grep "client: rdma_get_recv_comp:" | awk '{print $3}')
+    t2=$(echo "$output2" | grep "client: rdma_get_send_comp:" | awk '{print $3}')
+    t3=$(echo "$output2" | grep "client: rdma_post_send:" | awk '{print $3}')
+    t4=$(echo "$output2" | grep "client: rdma_connect:" | awk '{print $3}')
+    t5=$(echo "$output2" | grep "client: rdma_post_recv:" | awk '{print $3}')
+    t6=$(echo "$output2" | grep "client: rdma_reg_msgs:" | awk 'NR==1{print $3}')
+    t7=$(echo "$output2" | grep "client: rdma_send_flags:" | awk '{print $3}')
+    t8=$(echo "$output2" | grep "client: rdma_reg_msgs:" | awk 'NR==2{print $3}')
+    t9=$(echo "$output2" | grep "client: rdma_init:" | awk '{print $3}')
+    t10=$(echo "$output2" | grep "client: parameters_init:" | awk '{print $3}')
+    t11=$(echo "$output2" | grep "client: rdma_getaddrinfo:" | awk '{print $3}')
+    t12=$(echo "$output2" | grep "client: rdma_create_ep:" | awk '{print $3}')
+    t13=$(echo "$output2" | grep "client: rdma_listen:" | awk '{print $3}')
+    t14=$(echo "$output2" | grep "client: rdma_get_request:" | awk '{print $3}')
+    total_bt=$(echo "scale=6; $total_bt + $bt" | bc)
+    total_1=$(echo "scale=6; $total_1 + $t1" | bc)
+    total_2=$(echo "scale=6; $total_2 + $t2" | bc)
+    total_3=$(echo "scale=6; $total_3 + $t3" | bc)
+    total_4=$(echo "scale=6; $total_4 + $t4" | bc)
+    total_5=$(echo "scale=6; $total_5 + $t5" | bc)
+    total_6=$(echo "scale=6; $total_6 + $t6" | bc)
+    total_7=$(echo "scale=6; $total_7 + $t7" | bc)
+    total_8=$(echo "scale=6; $total_8 + $t8" | bc)
+    total_9=$(echo "scale=6; $total_9 + $t9" | bc)
+    total_10=$(echo "scale=6; $total_10 + $t10" | bc)
+    total_11=$(echo "scale=6; $total_11 + $t11" | bc)
+    total_12=$(echo "scale=6; $total_12 + $t12" | bc)
+    total_13=$(echo "scale=6; $total_13 + $t13" | bc)
+    total_14=$(echo "scale=6; $total_14 + $t14" | bc)
+    echo "Iteration $i finished"
 done
 
-# 计算平均值
-average=$(echo "scale=2; $total/200" | bc)
-echo "The average time value is: $average"
+average_bt=$(echo "scale=6; $total_bt / $count" | bc)
+average_1=$(echo "scale=6; $total_1 / $count" | bc)
+average_2=$(echo "scale=6; $total_2 / $count" | bc)
+average_3=$(echo "scale=6; $total_3 / $count" | bc)
+average_4=$(echo "scale=6; $total_4 / $count" | bc)
+average_5=$(echo "scale=6; $total_5 / $count" | bc)
+average_6=$(echo "scale=6; $total_6 / $count" | bc)
+average_7=$(echo "scale=6; $total_7 / $count" | bc)
+average_8=$(echo "scale=6; $total_8 / $count" | bc)
+average_9=$(echo "scale=6; $total_9 / $count" | bc)
+average_10=$(echo "scale=6; $total_10 / $count" | bc)
+average_11=$(echo "scale=6; $total_11 / $count" | bc)
+average_12=$(echo "scale=6; $total_12 / $count" | bc)
+average_13=$(echo "scale=6; $total_13 / $count" | bc)
+average_14=$(echo "scale=6; $total_14 / $count" | bc)
+
+echo "the between time is $average_bt"
+
+echo "client: rdma_get_request: $total_14"
+echo "client: rdma_listen: $average_13"
+echo "client: rdma_create_ep: $average_12"
+echo "client: rdma_getaddrinfo: $average_11"
+echo "client: parameters_init: $average_10"
+echo "client: rdma_init: $average_9"
+echo "client: rdma_reg_msgs: $average_8"
+echo "client: rdma_send_flags: $average_7"
+echo "client: rdma_reg_msgs: $average_6"
+echo "client: rdma_post_recv: $average_5"
+echo "client: rdma_connect: $average_4"
+echo "client: rdma_post_send: $average_3"
+echo "client: rdma_get_send_comp: $average_2"
+echo "client: rdma_get_recv_comp: $average_1"
+
 

@@ -1244,6 +1244,7 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiCtx {
             .iter()
             .map(|s| IoSlice::new(s.deref()))
             .collect();
+        
         let bytes_written = f.sock_send(&ioslices, SiFlags::empty()).await?;
 
         Ok(types::Size::try_from(bytes_written)?)
@@ -1353,12 +1354,13 @@ fn server_runs() {
     println!("rdma_server: end");
 }
 fn run(ip: &str, port: &str) -> i32 {
-    let mut send_msg = vec![1_u8; 16];
-    let mut recv_msg = vec![0_u8; 16];
+    let mut send_msg = vec![1_u8; 32];
+    let mut recv_msg = vec![0_u8; 32];
     let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
     let mut res: *mut rdma_addrinfo = null_mut();
 
     hints.ai_port_space = rdma_port_space::RDMA_PS_TCP as i32;
+    let now1 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
     let mut ret =
         unsafe { rdma_getaddrinfo(ip.as_ptr().cast(), port.as_ptr().cast(), &hints, &mut res) };
 
@@ -1366,6 +1368,7 @@ fn run(ip: &str, port: &str) -> i32 {
         println!("rdma_getaddrinfo");
         return ret;
     }
+    let now1_5 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
 
     let mut attr = unsafe { std::mem::zeroed::<ibv_qp_init_attr>() };
     let mut id: *mut rdma_cm_id = null_mut();
@@ -1379,12 +1382,12 @@ fn run(ip: &str, port: &str) -> i32 {
     ret = unsafe { rdma_create_ep(&mut id, res, null_mut(), &mut attr) };
     // Check to see if we got inline data allowed or not
     let mut send_flags = 0_u32;
-    if attr.cap.max_inline_data >= 16 {
+    if attr.cap.max_inline_data >= 32 {
         send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
     } else {
         println!("rdma_client: device doesn't support IBV_SEND_INLINE, using sge sends");
     }
-
+    // let now_1_5_5 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
     if ret != 0 {
         println!("rdma_create_ep");
         unsafe {
@@ -1392,8 +1395,9 @@ fn run(ip: &str, port: &str) -> i32 {
         }
         return ret;
     }
+    let now2 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
 
-    let mr = unsafe { rdma_reg_msgs(id, recv_msg.as_mut_ptr().cast(), 16) };
+    let mr = unsafe { rdma_reg_msgs(id, recv_msg.as_mut_ptr().cast(), 32) };
     if mr.is_null() {
         println!("rdma_reg_msgs for recv_msg");
         unsafe {
@@ -1401,11 +1405,12 @@ fn run(ip: &str, port: &str) -> i32 {
         }
         return -1;
     }
+    let now3 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
 
     let mut send_mr = null_mut();
     if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) as u32 == 0 {
         println!("flags {:?}", send_flags);
-        send_mr = unsafe { rdma_reg_msgs(id, send_msg.as_mut_ptr().cast(), 16) };
+        send_mr = unsafe { rdma_reg_msgs(id, send_msg.as_mut_ptr().cast(), 32) };
         if send_mr.is_null() {
             println!("rdma_reg_msgs for send_msg");
             unsafe {
@@ -1414,8 +1419,9 @@ fn run(ip: &str, port: &str) -> i32 {
             return -1;
         }
     }
+    let now4 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
 
-    ret = unsafe { rdma_post_recv(id, null_mut(), recv_msg.as_mut_ptr().cast(), 16, mr) };
+    ret = unsafe { rdma_post_recv(id, null_mut(), recv_msg.as_mut_ptr().cast(), 32, mr) };
     if ret != 0 {
         println!("rdma_post_recv");
         if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) as u32 == 0 {
@@ -1423,6 +1429,7 @@ fn run(ip: &str, port: &str) -> i32 {
         }
         return ret;
     }
+    let now5 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
 
     ret = unsafe { rdma_connect(id, null_mut()) };
     if ret != 0 {
@@ -1432,13 +1439,14 @@ fn run(ip: &str, port: &str) -> i32 {
         }
         return ret;
     }
+    let now6 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
 
     ret = unsafe {
         rdma_post_send(
             id,
             null_mut(),
             send_msg.as_mut_ptr().cast(),
-            16,
+            32,
             send_mr,
             send_flags.try_into().unwrap(),
         )
@@ -1451,6 +1459,7 @@ fn run(ip: &str, port: &str) -> i32 {
         return ret;
     }
 
+    let now7 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
     let mut wc = unsafe { std::mem::zeroed::<ibv_wc>() };
     while ret == 0 {
         ret = unsafe { rdma_get_send_comp(id, &mut wc) };
@@ -1462,6 +1471,7 @@ fn run(ip: &str, port: &str) -> i32 {
         }
         return ret;
     }
+    let now8 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
 
     ret = 0;
     while ret == 0 {
@@ -1473,6 +1483,17 @@ fn run(ip: &str, port: &str) -> i32 {
     } else {
         ret = 0;
     }
+    let now9 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros();
+    println!("client: rdma_get_recv_comp: {}", now9 - now8);
+    println!("client: rdma_get_send_comp: {}", now8 - now7);
+    println!("client: rdma_post_send: {}", now7 - now6);
+    println!("client: rdma_connect: {}", now6 - now5);
+    println!("client: rdma_post_recv: {}", now5 - now4);
+    println!("client: rdma_reg_msgs: {}", now4 - now3);
+    println!("client: rdma_reg_msgs: {}", now3 - now2);
+    println!("client: rdma_init: {}", now2 - now1);
+    println!("client: rdma_create_ep: {}", now2 - now1_5);
+    println!("client: rdma_getaddrinfo: {}", now1_5 - now1);
 
     ret
 }
@@ -1519,8 +1540,8 @@ async fn test() {
 // #[tokio::main]
 // async fn server_run() -> i32 {
 fn server_run() -> i32 {
-    let mut send_msg = vec![1_u8; 16];
-    let mut recv_msg = vec![0_u8; 16];
+    let mut send_msg = vec![1_u8; 32];
+    let mut recv_msg = vec![0_u8; 32];
     let mut hints = unsafe { std::mem::zeroed::<rdma_addrinfo>() };
     let mut res: *mut rdma_addrinfo = null_mut();
     hints.ai_flags = RAI_PASSIVE.try_into().unwrap();
@@ -1595,13 +1616,13 @@ fn server_run() -> i32 {
     }
 
     let mut send_flags = 0_u32;
-    if init_attr.cap.max_inline_data >= 16 {
+    if init_attr.cap.max_inline_data >= 32 {
         send_flags = ibv_send_flags::IBV_SEND_INLINE.0;
     } else {
         println!("rdma_server: device doesn't support IBV_SEND_INLINE, using sge sends");
     }
 
-    let recv_mr = unsafe { rdma_reg_msgs(id, recv_msg.as_mut_ptr().cast(), 16) };
+    let recv_mr = unsafe { rdma_reg_msgs(id, recv_msg.as_mut_ptr().cast(), 32) };
     if recv_mr.is_null() {
         ret = -1;
         println!("rdma_reg_msgs for recv_msg");
@@ -1613,7 +1634,7 @@ fn server_run() -> i32 {
 
     let mut send_mr = null_mut();
     if (send_flags & ibv_send_flags::IBV_SEND_INLINE.0) == 0 {
-        send_mr = unsafe { rdma_reg_msgs(id, send_msg.as_mut_ptr().cast(), 16) };
+        send_mr = unsafe { rdma_reg_msgs(id, send_msg.as_mut_ptr().cast(), 32) };
         if send_mr.is_null() {
             ret = -1;
             println!("rdma_reg_msgs for send_msg");
@@ -1623,7 +1644,7 @@ fn server_run() -> i32 {
             return ret;
         }
     }
-    ret = unsafe { rdma_post_recv(id, null_mut(), recv_msg.as_mut_ptr().cast(), 16, recv_mr) };
+    ret = unsafe { rdma_post_recv(id, null_mut(), recv_msg.as_mut_ptr().cast(), 32, recv_mr) };
 
     if ret != 0 {
         println!("rdma_post_recv");
@@ -1659,7 +1680,7 @@ fn server_run() -> i32 {
             id,
             null_mut(),
             send_msg.as_mut_ptr().cast(),
-            16,
+            32,
             send_mr,
             send_flags.try_into().unwrap(),
         )
