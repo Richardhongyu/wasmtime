@@ -31,14 +31,6 @@
     (field $rkey u32)
   )
 )
-(typename $ibv_mr_info
-  (record
-    (field $addr u64)
-    (field $length u32)
-    (field $lkey u32)
-    (field $rkey u32)
-  )
-)
 
 (typename $ibv_qp_cap
   (record
