@@ -7,7 +7,7 @@ use wiggle::GuestPtr;
 
 use crate::guest_types::IbvWc;
 use crate::guest_types::RdmaError::*;
-use crate::guest_types::{IbvMr, IbvQpCap, Rdma, RdmaAddrinfoStruct, RdmaError};
+use crate::guest_types::{IbvMr, IbvQpCap, Rdma, RdmaAddrinfoStruct, RdmaError,IbvMrInfo};
 use crate::rdma::{RdmaIbvWc, RdmaMr, RDMA};
 use crate::table;
 use crate::witx::wasi_ephemeral_rdma::WasiEphemeralRdma;
@@ -236,7 +236,39 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             Ok(wc)
         }
     }
+    fn mr_get_addr(&mut self, ibv_mr: IbvMr) -> Result<IbvMrInfo, RdmaError>{
+        let ibv_mr: Arc<RdmaMr> = self.table.get(ibv_mr.into()).map_err(|_| HandleNotFound)?;
+        let mr = unsafe{*(ibv_mr.0)};
+        let addr = mr.addr as u64;
+        let length = mr.length as u32;
+        let lkey = mr.lkey;
+        let rkey = mr.rkey;
+        Ok(IbvMrInfo{
+            addr,
+            length,
+            lkey,
+            rkey,
+        })
+    }
+    fn ibv_wr_rdma_read(
+        &mut self,
+        rdma: Rdma,
+        rkey: u32,
+        addr: u64,
+    ) -> Result<(), RdmaError>{
+        let rdma:Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| HandleNotFound)?;
+        let id = rdma.id()?;
+        todo!()        
+    }
+    fn ibv_wr_rdma_write(
+        &mut self,
+        rdma: Rdma,
+        rkey: u32,
+        addr: u64,
+    ) -> Result<(), RdmaError>{
+        todo!()
 
+    }
     fn rdma_get_recv_comp(&mut self, rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaError> {
         let rdma: Arc<RDMA> = self.table.get(rdma.into()).map_err(|_| HandleNotFound)?;
         let id = rdma.id()?;
@@ -306,12 +338,14 @@ impl WasiEphemeralRdma for WasiRdmaCtx {
             // println!("{:?}", std::io::Error::last_os_error());
             return Err(RuntimeError);
         }
+        
         Ok(self
             .table
             .push(Arc::new(RdmaMr(mr)))
             .map_err(|_| HandleNoFreeKeys)?
             .into())
     }
+    
 
     fn rdma_dereg_mr(&mut self, ibv_mr: IbvMr) {
         let mr = self

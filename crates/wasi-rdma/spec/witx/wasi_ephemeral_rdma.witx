@@ -23,6 +23,14 @@
     (field $dst_len u32)
   )
 )
+(typename $ibv_mr_info
+  (record
+    (field $addr u64)
+    (field $length u32)
+    (field $lkey u32)
+    (field $rkey u32)
+  )
+)
 
 (typename $ibv_qp_cap
   (record
@@ -58,6 +66,7 @@
 
     (result $error (expected (error $rdma_error)))
   )
+
 
   (@interface func (export "rdma_disconnect")
     (param $rdma $rdma)
@@ -123,7 +132,22 @@
 
     (result $error (expected (error $rdma_error)))
   )
-
+  (@interface func (export "mr_get_addr")
+  (param $ibv_mr $ibv_mr)
+  (result $error (expected $ibv_mr_info (error $rdma_error)))
+  )
+  (@interface func (export "ibv_wr_rdma_read")
+  (param $rdma $rdma)
+  (param $rkey u32)
+  (param $addr u64)
+  (result $error (expected (error $rdma_error)))
+  )
+  (@interface func (export "ibv_wr_rdma_write")
+  (param $rdma $rdma)
+  (param $rkey u32)
+  (param $addr u64)
+  (result $error (expected (error $rdma_error)))
+  )
   (@interface func (export "print_hello_world")
   )
 )
