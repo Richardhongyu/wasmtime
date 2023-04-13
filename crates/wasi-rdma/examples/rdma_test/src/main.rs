@@ -6,7 +6,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use wasi_rdma;
 static SERVER: &str = "192.168.217.128\0";
 static PORT: &str = "7471\0";
-
 fn main() {
     // println!("RDMA Client Test");
     // wasi::thread_spawn
@@ -88,12 +87,12 @@ fn client_run() -> i32 {
     let rdma = unsafe { wasi_rdma::rdma_init(SERVER, PORT, rdma_info, cap, 0).unwrap() };
 
     // println!("client");
-    let mr = unsafe { wasi_rdma::rdma_reg_msgs(rdma, recv_msg.as_mut_ptr().cast(), 32).unwrap() };
+    let mr = unsafe { wasi_rdma::rdma_reg_msgs(rdma, recv_msg.as_mut_ptr().cast(), 32,wasi_rdma::rdma_ibv_access_flags::IBV_ACCESS_LOCAL_WRITE).unwrap() };
     send_flags = unsafe { wasi_rdma::rdma_send_flags(rdma).unwrap() };
     // println!("client");
     let send_mr = if (send_flags & wasi_rdma::rdma_ibv_send_flags::IBV_SEND_INLINE) as u32 == 0 {
         println!("client send_flags:{}",send_flags);
-        unsafe { wasi_rdma::rdma_reg_msgs(rdma, send_msg.as_mut_ptr().cast(), 32).unwrap() }
+        unsafe { wasi_rdma::rdma_reg_msgs(rdma, send_msg.as_mut_ptr().cast(), 32,wasi_rdma::rdma_ibv_access_flags::IBV_ACCESS_LOCAL_WRITE).unwrap() }
     } else {
         0
     };

@@ -9,7 +9,9 @@ use core::mem::MaybeUninit;
 pub struct RdmaError(u16);
 pub const RDMA_ERROR_SUCCESS: RdmaError = RdmaError(0);
 pub const RDMA_ERROR_RUNTIME_ERROR: RdmaError = RdmaError(1);
-pub const RDMA_ERROR_IO_ERROR: RdmaError = RdmaError(2);
+pub const RDMA_ERROR_HANDLE_NOT_FOUND: RdmaError = RdmaError(2);
+pub const RDMA_ERROR_INVALID_ARGUMENT: RdmaError = RdmaError(3);
+pub const RDMA_ERROR_HANDLE_NO_FREE_KEYS: RdmaError = RdmaError(4);
 impl RdmaError {
     pub const fn raw(&self) -> u16 {
         self.0
@@ -19,7 +21,9 @@ impl RdmaError {
         match self.0 {
             0 => "SUCCESS",
             1 => "RUNTIME_ERROR",
-            2 => "IO_ERROR",
+            2 => "HANDLE_NOT_FOUND",
+            3 => "INVALID_ARGUMENT",
+            4 => "HANDLE_NO_FREE_KEYS",
             _ => unsafe { core::hint::unreachable_unchecked() },
         }
     }
@@ -28,6 +32,8 @@ impl RdmaError {
             0 => "",
             1 => "",
             2 => "",
+            3 => "",
+            4 => "",
             _ => unsafe { core::hint::unreachable_unchecked() },
         }
     }
@@ -54,6 +60,14 @@ pub struct RdmaAddrinfoStruct {
     pub qp_type: u32,
     pub src_len: u32,
     pub dst_len: u32,
+}
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct IbvMrInfo {
+    pub addr: u64,
+    pub length: u32,
+    pub lkey: u32,
+    pub rkey: u32,
 }
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -146,12 +160,18 @@ pub unsafe fn rdma_get_recv_comp(rdma: Rdma, wc: IbvWc) -> Result<IbvWc, RdmaErr
     }
 }
 
-pub unsafe fn rdma_reg_msgs(rdma: Rdma, addr: *mut u8, size: u32) -> Result<IbvMr, RdmaError> {
+pub unsafe fn rdma_reg_msgs(
+    rdma: Rdma,
+    addr: *mut u8,
+    size: u32,
+    access: u32,
+) -> Result<IbvMr, RdmaError> {
     let mut rp0 = MaybeUninit::<IbvMr>::uninit();
     let ret = wasi_ephemeral_rdma::rdma_reg_msgs(
         rdma as i32,
         addr as i32,
         size as i32,
+        access as i32,
         rp0.as_mut_ptr() as i32,
     );
     match ret {
@@ -206,6 +226,47 @@ pub unsafe fn ibv_query_qp(rdma: Rdma, ibv_qp_attrmask: u32) -> Result<(), RdmaE
     }
 }
 
+pub unsafe fn mr_get_addr(ibv_mr: IbvMr) -> Result<IbvMrInfo, RdmaError> {
+    let mut rp0 = MaybeUninit::<IbvMrInfo>::uninit();
+    let ret = wasi_ephemeral_rdma::mr_get_addr(ibv_mr as i32, rp0.as_mut_ptr() as i32);
+    match ret {
+        0 => Ok(core::ptr::read(rp0.as_mut_ptr() as i32 as *const IbvMrInfo)),
+        _ => Err(RdmaError(ret as u16)),
+    }
+}
+
+pub unsafe fn ibv_wr_rdma_read(
+    rdma: Rdma,
+    rkey: u32,
+    addr: u64,
+    length: u32,
+) -> Result<(), RdmaError> {
+    let ret =
+        wasi_ephemeral_rdma::ibv_wr_rdma_read(rdma as i32, rkey as i32, addr as i64, length as i32);
+    match ret {
+        0 => Ok(()),
+        _ => Err(RdmaError(ret as u16)),
+    }
+}
+
+pub unsafe fn ibv_wr_rdma_write(
+    rdma: Rdma,
+    rkey: u32,
+    addr: u64,
+    length: u32,
+) -> Result<(), RdmaError> {
+    let ret = wasi_ephemeral_rdma::ibv_wr_rdma_write(
+        rdma as i32,
+        rkey as i32,
+        addr as i64,
+        length as i32,
+    );
+    match ret {
+        0 => Ok(()),
+        _ => Err(RdmaError(ret as u16)),
+    }
+}
+
 pub unsafe fn print_hello_world() {
     wasi_ephemeral_rdma::print_hello_world();
 }
@@ -229,11 +290,14 @@ pub mod wasi_ephemeral_rdma {
         pub fn rdma_accept(arg0: i32) -> i32;
         pub fn rdma_send_flags(arg0: i32, arg1: i32) -> i32;
         pub fn rdma_get_recv_comp(arg0: i32, arg1: i32, arg2: i32) -> i32;
-        pub fn rdma_reg_msgs(arg0: i32, arg1: i32, arg2: i32, arg3: i32) -> i32;
+        pub fn rdma_reg_msgs(arg0: i32, arg1: i32, arg2: i32, arg3: i32, arg4: i32) -> i32;
         pub fn rdma_dereg_mr(arg0: i32);
         pub fn rdma_post_send(arg0: i32, arg1: i32, arg2: i32, arg3: i32, arg4: i32) -> i32;
         pub fn rdma_post_recv(arg0: i32, arg1: i32, arg2: i32, arg3: i32) -> i32;
         pub fn ibv_query_qp(arg0: i32, arg1: i32) -> i32;
+        pub fn mr_get_addr(arg0: i32, arg1: i32) -> i32;
+        pub fn ibv_wr_rdma_read(arg0: i32, arg1: i32, arg2: i64, arg3: i32) -> i32;
+        pub fn ibv_wr_rdma_write(arg0: i32, arg1: i32, arg2: i64, arg3: i32) -> i32;
         pub fn print_hello_world();
     }
 }

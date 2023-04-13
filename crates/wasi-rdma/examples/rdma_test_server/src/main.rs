@@ -146,11 +146,11 @@ fn server_run() -> i32 {
     send_flags = unsafe { wasi_rdma::rdma_send_flags(rdma).unwrap() };
     println!("rdma_server: send_flags: {:?}", send_flags);
 
-    let mr = unsafe { wasi_rdma::rdma_reg_msgs(rdma, recv_msg.as_mut_ptr().cast(), 32).unwrap() };
+    let mr = unsafe { wasi_rdma::rdma_reg_msgs(rdma, recv_msg.as_mut_ptr().cast(), 32,wasi_rdma::rdma_ibv_access_flags::IBV_ACCESS_REMOTE_READ|wasi_rdma::rdma_ibv_access_flags::IBV_ACCESS_LOCAL_WRITE|wasi_rdma::rdma_ibv_access_flags::IBV_ACCESS_REMOTE_WRITE).unwrap() };
     let mut send_mr = 0;
     if (send_flags & wasi_rdma::rdma_ibv_send_flags::IBV_SEND_INLINE) == 0 {
         send_mr =
-            unsafe { wasi_rdma::rdma_reg_msgs(rdma, send_msg.as_mut_ptr().cast(), 32).unwrap() };
+            unsafe { wasi_rdma::rdma_reg_msgs(rdma, send_msg.as_mut_ptr().cast(), 32,0).unwrap() };
     }
     unsafe { wasi_rdma::rdma_post_recv(rdma, recv_msg.as_mut_ptr().cast(), 32, mr).unwrap() };
 

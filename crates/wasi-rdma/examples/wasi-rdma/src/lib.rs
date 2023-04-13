@@ -87,3 +87,17 @@ pub mod rdma_ibv_send_flags{
     pub const IBV_SEND_INLINE: Type = 8;
     pub const IBV_SEND_IP_CSUM: Type = 16;
 }
+pub mod rdma_ibv_access_flags{
+    pub type Type = ::std::os::raw::c_uint;
+    pub const IBV_ACCESS_DEFAULT: Type = 0;
+    pub const IBV_ACCESS_LOCAL_WRITE: Type = 1;
+    pub const IBV_ACCESS_REMOTE_WRITE: Type = 2;
+    pub const IBV_ACCESS_REMOTE_READ: Type = 4;
+    pub const IBV_ACCESS_REMOTE_ATOMIC: Type = 8;
+    pub const IBV_ACCESS_MW_BIND: Type = 16;
+    pub const IBV_ACCESS_ZERO_BASED: Type = 32;
+    pub const IBV_ACCESS_ON_DEMAND: Type = 64;
+    pub const IBV_ACCESS_HUGETLB: Type = 128;
+    pub const IBV_ACCESS_RELAXED_ORDERING: Type = 1048576;
+    // pub const IBV_ACCESS_NO_RDMA: Type = 2048;
+}
